@@ -57,7 +57,7 @@ public sealed class RegistrationTests
 
         Assert.NotNull(client.Producer);
         Assert.NotNull(client.GetConsumer("q"));
-        Assert.NotNull(provider.GetRequiredService<IPayloadSerializer>());
+        Assert.NotNull(provider.GetRequiredService<QueuePayloadSerializer>().Value);
         Assert.NotNull(provider.GetRequiredService<IQueueWakeup>());
     }
 

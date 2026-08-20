@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -198,7 +199,8 @@ public sealed class WorkerHostTests(PostgresFixture fixture)
         TestHelpers.WithClientAsync(provider, c => c.Producer.EnqueueAsync(
             queue,
             Enumerable.Range(0, count)
-                .Select(i => QueueMessageData.FromJson("Order", new OrderMessage(i, $"o{i}")))
+                .Select(i => QueueMessageData.FromBytes(
+                    "Order", JsonSerializer.SerializeToUtf8Bytes(new OrderMessage(i, $"o{i}"))))
                 .ToList()));
 
     // ---- tests ----

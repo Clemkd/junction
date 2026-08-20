@@ -1,11 +1,11 @@
 using System.Text;
-using System.Text.Json;
 
 namespace Junction.Queue;
 
 /// <summary>
-/// A message to enqueue. The payload is opaque bytes to the library; factories cover the common
-/// text/JSON cases.
+/// A message to enqueue. The payload is opaque bytes to the library — use <see cref="FromText"/> or
+/// <see cref="FromBytes"/> to build one directly, or <see cref="IQueueProducer.EnqueueAsync{T}"/> to
+/// have it built for you through the module's <see cref="IPayloadSerializer"/>.
 /// </summary>
 public sealed record QueueMessageData
 {
@@ -53,20 +53,6 @@ public sealed record QueueMessageData
         {
             Type = type,
             Payload = Encoding.UTF8.GetBytes(text),
-            Priority = priority,
-            Delay = delay,
-            DedupKey = dedupKey,
-            Headers = headers,
-        };
-
-    /// <summary>Create a message by JSON-serializing <paramref name="value"/>.</summary>
-    public static QueueMessageData FromJson<T>(string type, T value, int priority = 0,
-        TimeSpan delay = default, string? dedupKey = null,
-        IReadOnlyDictionary<string, string>? headers = null) =>
-        new()
-        {
-            Type = type,
-            Payload = JsonSerializer.SerializeToUtf8Bytes(value),
             Priority = priority,
             Delay = delay,
             DedupKey = dedupKey,

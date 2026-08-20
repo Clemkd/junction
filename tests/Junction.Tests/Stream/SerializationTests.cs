@@ -37,10 +37,11 @@ public sealed class SerializationTests
     }
 
     [Fact]
-    public void EventData_FromJson_serializes_payload()
+    public void EventData_FromBytes_round_trips_through_the_serializer()
     {
-        var evt = EventData.FromJson("T", new Order(7, "x"));
-        var order = new JsonPayloadSerializer().Deserialize<Order>(evt.Payload);
+        var serializer = new JsonPayloadSerializer();
+        var evt = EventData.FromBytes("T", serializer.Serialize(new Order(7, "x")));
+        var order = serializer.Deserialize<Order>(evt.Payload);
         Assert.Equal(new Order(7, "x"), order);
     }
 

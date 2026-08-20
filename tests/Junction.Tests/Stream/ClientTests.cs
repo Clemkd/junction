@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -146,7 +147,7 @@ public sealed class ClientTests(PostgresFixture fixture)
         var stream = PostgresFixture.NewName("payload");
 
         await client.Producer.AppendAsync(stream, EventData.FromText("T", "hello"));
-        await client.Producer.AppendAsync(stream, EventData.FromJson("T", new Point(3, 4)));
+        await client.Producer.AppendAsync(stream, EventData.FromBytes("T", JsonSerializer.SerializeToUtf8Bytes(new Point(3, 4))));
 
         var records = (await client.GetConsumer(stream, "c").PollAsync(10)).Records;
         Assert.Equal("hello", records[0].AsText());

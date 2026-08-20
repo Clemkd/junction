@@ -3,8 +3,26 @@ using Junction.Queue.Internal;
 
 namespace Junction.Queue;
 
-internal sealed class QueueProducer(QueueCatalog catalog, IJunctionConnectionSource source) : IQueueProducer
+internal sealed class QueueProducer(QueueCatalog catalog, IJunctionConnectionSource source, QueuePayloadSerializer serializer)
+    : IQueueProducer
 {
+    public Task<EnqueueResult> EnqueueAsync<T>(
+        T value,
+        string? queue = null,
+        int priority = 0,
+        TimeSpan delay = default,
+        string? dedupKey = null,
+        IReadOnlyDictionary<string, string>? headers = null,
+        CancellationToken cancellationToken = default)
+    {
+        string type = typeof(T).Name;
+        byte[] payload = serializer.Value.Serialize(value);
+        return EnqueueAsync(
+            queue ?? type,
+            QueueMessageData.FromBytes(type, payload, priority, delay, dedupKey, headers),
+            cancellationToken);
+    }
+
     public async Task<EnqueueResult> EnqueueAsync(
         string queue, QueueMessageData message, CancellationToken cancellationToken = default)
     {

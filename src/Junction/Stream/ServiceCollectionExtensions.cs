@@ -18,10 +18,16 @@ public static class ServiceCollectionExtensions
     /// <see cref="JunctionDbContext"/> factory, the shared <see cref="IEventProducer"/>
     /// and the <see cref="IStreamClient"/> entry point.
     /// </summary>
+    /// <param name="serializer">
+    /// Serializer for the typed consumer API (<see cref="ISingleMessageConsumer{T}"/>,
+    /// <see cref="StreamConsumer{T}"/>, <c>AppendAsync&lt;T&gt;</c>). Defaults to
+    /// <see cref="JsonPayloadSerializer"/>. Applies to this stream registration only.
+    /// </param>
     public static IServiceCollection AddStream(
         this IServiceCollection services,
         string connectionString,
-        Action<StreamOptions>? configure = null)
+        Action<StreamOptions>? configure = null,
+        IPayloadSerializer? serializer = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
@@ -40,7 +46,7 @@ public static class ServiceCollectionExtensions
                 db.EnableSensitiveDataLogging();
         });
 
-        services.TryAddSingleton<IPayloadSerializer>(new JsonPayloadSerializer());
+        services.TryAddSingleton(new StreamPayloadSerializer(serializer ?? new JsonPayloadSerializer()));
 
         // Push delivery. Always registered, inert when disabled, and its LISTEN connection is only
         // opened once a consumer in this process actually waits for events.
@@ -52,7 +58,8 @@ public static class ServiceCollectionExtensions
         {
             services.AddSingleton<EventProducer>();
             services.AddSingleton<IEventProducer>(sp =>
-                new GroupCommitProducer(sp.GetRequiredService<EventProducer>(), options));
+                new GroupCommitProducer(
+                    sp.GetRequiredService<EventProducer>(), options, sp.GetRequiredService<StreamPayloadSerializer>()));
         }
         else
         {
@@ -67,8 +74,7 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Register a consumer class as a hosted background service. <typeparamref name="TConsumer"/>
     /// must implement exactly one of <see cref="ISingleMessageConsumer"/> or
-    /// <see cref="IBatchMessageConsumer"/>. Requires a Generic Host and a prior
-    /// <see cref="AddStream(IServiceCollection, string, Action{StreamOptions})"/>.
+    /// <see cref="IBatchMessageConsumer"/>. Requires a Generic Host and a prior <c>AddStream</c>.
     /// </summary>
     /// <param name="lifetime">
     /// Lifetime of the consumer class itself. Defaults to <see cref="ServiceLifetime.Scoped"/> so a

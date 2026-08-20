@@ -33,24 +33,6 @@ Both modules share:
   differently on absent headers**: Queue's `Deserialize` returns `null`, Stream's returns an empty
   dictionary. Match the module you're calling.
 
-## Concurrency: why Queue and Stream differ
-
-Queue messages are independent of each other: each is claimed and leased on its own, so N workers can
-hold and process N different messages at the same time with nothing to order between them.
-`QueueWorkerHostBase` runs a claim → bounded-channel → N-processor pipeline for exactly that reason,
-and `QueueWorkerOptions.Concurrency` controls how many processors run at once.
-
-Stream events are not independent: a stream is an ordered log with a single cursor, and the cursor
-only ever advances past events that have actually been handled. Fanning a batch out to concurrent
-processors and letting them finish in any order would mean either committing past an event that's
-still failing, or building a more general "advance to the highest fully-processed contiguous offset"
-scheme. `ConsumerHostBase` sidesteps that by processing a polled batch as one unit and committing once,
-rather than dispatching its events concurrently.
-
-That doesn't rule out parallelism within a batch: `IBatchMessageConsumer<T>`/`IBatchMessageConsumer`
-hand you the whole batch before the single commit, so you can process its events with your own
-`Task.WhenAll` (or any other in-process concurrency) inside the handler if the work benefits from it.
-
 ## Push delivery (LISTEN/NOTIFY)
 
 Both modules support push delivery: idle workers/consumers wait on a PostgreSQL `NOTIFY` instead of
@@ -83,39 +65,39 @@ registration call site (e.g. `OrderHandler`, not an open `QueueHandler<>`).
 
 `IQueueProducer.EnqueueAsync<T>(value, queue: null, ...)` and
 `IEventProducer.AppendAsync<T>(value, stream: null, ...)` are the matching producer-side convenience:
-they JSON-serialize `value` and default the queue/stream name (and the message/event `Type`) to
+they serialize `value` through the module's `IPayloadSerializer` (JSON by default — see "Overriding
+the default serialization" below) and default the queue/stream name (and the message/event `Type`) to
 `typeof(T).Name`. The lower-level `EnqueueAsync(string queue, QueueMessageData, ...)` /
 `AppendAsync(string stream, EventData, ...)` overloads cover anything that doesn't fit the "one queue
-per type" default — non-JSON payloads, per-message priority/delay/dedup key, etc.
+per type" default — a pre-encoded payload, per-message priority/delay/dedup key, etc.
 
 ## Overriding the default serialization
 
-Typed handlers (`IQueueMessageHandler<T>`, `QueueHandler<T>`, `ISingleMessageConsumer<T>`,
-`StreamConsumer<T>`) turn a message/event's payload back into `T` through `Junction.IPayloadSerializer`
-— one instance, resolved as a singleton and shared by both modules. Register your own implementation
-before `AddQueue`, `AddStream`, or `AddJunction` (both modules register the default,
-`JsonPayloadSerializer`, with `TryAddSingleton`, so an already-registered instance wins):
+Both directions — producing (`EnqueueAsync<T>`, `AppendAsync<T>`) and consuming (`IQueueMessageHandler<T>`,
+`QueueHandler<T>`, `ISingleMessageConsumer<T>`, `StreamConsumer<T>`) — go through the same
+`Junction.IPayloadSerializer`, so a value round-trips through exactly one codec. The default is
+`JsonPayloadSerializer`.
+
+Replace it by passing your own implementation to `AddQueue`'s or `AddStream`'s `serializer` parameter
+(also exposed on `AddJunction`, as `queueSerializer`/`streamSerializer`):
 
 ```csharp
-services.AddSingleton<IPayloadSerializer, MessagePackPayloadSerializer>();
-services.AddJunction<AppDbContext>(connectionString);
+services.AddQueue<AppDbContext>(serializer: new MessagePackPayloadSerializer());
+services.AddStream(connectionString, serializer: new MessagePackPayloadSerializer());
+
+// Or through the combined entry point:
+services.AddJunction<AppDbContext>(connectionString,
+    queueSerializer: new MessagePackPayloadSerializer(),
+    streamSerializer: new MessagePackPayloadSerializer());
 ```
 
-Two things to know:
+Each module keeps its own instance — Queue and Stream can use different serializers, or the same one,
+as needed.
 
-- **It's one registration, shared by both modules** — there's no way to hand Queue one serializer and
-  Stream another through this mechanism. If you need different wire formats per module, implement one
-  `IPayloadSerializer` that branches internally (on `typeof(T)`, on a marker interface, …).
-- **The producer-side JSON factories don't go through it.** `QueueMessageData.FromJson`/
-  `EventData.FromJson` — and therefore `EnqueueAsync<T>`/`AppendAsync<T>` — call `System.Text.Json`
-  directly. If you switch to a different wire format, produce through `QueueMessageData.FromBytes`/
-  `EventData.FromBytes` with your own encoding instead, so both ends agree:
-
-  ```csharp
-  byte[] payload = MyCodec.Serialize(order);
-  await junction.Queue.Producer.EnqueueAsync("Order", QueueMessageData.FromBytes("Order", payload));
-  // EventData.FromBytes(...) + IEventProducer.AppendAsync(...) is the equivalent on the Stream side.
-  ```
+To bypass serialization entirely for a specific message/event (raw bytes you've already encoded some
+other way), use `QueueMessageData.FromBytes`/`EventData.FromBytes` with the lower-level
+`EnqueueAsync(string queue, QueueMessageData, ...)`/`AppendAsync(string stream, EventData, ...)`
+overloads instead of the typed `EnqueueAsync<T>`/`AppendAsync<T>`.
 
 ## Multiple queues or streams for one type
 
@@ -182,6 +164,40 @@ services.AddJunction<AppDbContext>(connectionString, o =>
     o.Stream.BulkInsertThreshold = 200;
 });
 ```
+
+### `QueueOptions`
+
+| Name | Description | Default |
+|---|---|---|
+| `Schema` | PostgreSQL schema holding the queue tables (shared with Stream). | `"junction"` |
+| `AutoCreateSchema` | Create the schema, tables and indexes on `InitializeAsync` if missing. | `true` |
+| `ApplyStorageTuning` | Apply `fillfactor`/autovacuum tuning suited to a high-churn table. | `true` |
+| `Completion` | What acknowledging a message does with its row (`Delete` or `Archive`). | `CompletionMode.Delete` |
+| `LeaseDuration` | Visibility timeout: how long a claim holds a message before it's reclaimable. | `30s` |
+| `MaxAttempts` | Delivery attempts allowed before a message is dead-lettered. | `5` |
+| `RecoverOnClaim` | Recover expired leases inline when a claim finds nothing ready. | `true` |
+| `Retry` | Backoff before a failed message's next attempt. | base `1s`, ×2 per attempt, capped `5min`, `0.2` jitter |
+| `StarvationThreshold` | Longest a claimable message may be passed over by higher-priority work. `null` keeps priority absolute. | `null` |
+| `MaintenanceInterval` | Interval of the maintenance loop (lease recovery + retention pruning). | `15s` |
+| `AutoMaintenance` | Register the maintenance loop automatically alongside the first hosted worker. | `true` |
+| `MetricsInterval` | Refresh interval for the gauge metrics (depth, oldest-ready age, dead letters, …). | `30s` |
+| `ArchiveRetention` | How long completed messages are kept in the archive table. | `7 days` |
+| `DeadLetterRetention` | How long dead-lettered messages are kept. | `30 days` |
+| `EnableNotifications` | Wake idle workers via `LISTEN`/`NOTIFY` instead of polling only. | `false` |
+| `ListenerConnectionString` | Connection string for the dedicated `LISTEN` connection, when using the EF connector. | `null` |
+
+### `StreamOptions`
+
+| Name | Description | Default |
+|---|---|---|
+| `AutoCreateSchema` | Create the schema via `EnsureCreated` on first use if missing. | `true` |
+| `EnableSensitiveDataLogging` | Enable EF Core sensitive data logging (payloads/parameters). Dev only. | `false` |
+| `BulkInsertThreshold` | Batch size at/above which appends use the BulkForge binary-`COPY` path instead of EF inserts. | `100` |
+| `EnablePushDelivery` | Wake idle consumers via `LISTEN`/`NOTIFY` instead of polling only. | `true` |
+| `PushReconnectDelay` | Delay before reopening the push-delivery connection after it drops. | `5s` |
+| `EnableGroupCommit` | Coalesce single-event appends into grouped transactions via a background flusher. | `false` |
+| `GroupCommitMaxBatch` | Maximum events coalesced into a single group-commit flush. | `1000` |
+| `GroupCommitLinger` | How long the flusher waits for more events to accumulate before flushing a partial batch. | `2ms` |
 
 ## Not included
 

@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Junction.Stream.Internal;
 
 namespace Junction.Stream;
 
@@ -14,15 +15,17 @@ internal sealed class GroupCommitProducer : IEventProducer, IAsyncDisposable
     private readonly record struct Request(string Stream, EventData Event, TaskCompletionSource<long> Completion);
 
     private readonly IEventProducer _inner;
+    private readonly StreamPayloadSerializer _serializer;
     private readonly int _maxBatch;
     private readonly TimeSpan _linger;
     private readonly Channel<Request> _channel;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly Task _flushLoop;
 
-    public GroupCommitProducer(IEventProducer inner, StreamOptions options)
+    public GroupCommitProducer(IEventProducer inner, StreamOptions options, StreamPayloadSerializer serializer)
     {
         _inner = inner;
+        _serializer = serializer;
         _maxBatch = Math.Max(1, options.GroupCommitMaxBatch);
         _linger = options.GroupCommitLinger;
         _channel = Channel.CreateUnbounded<Request>(new UnboundedChannelOptions
@@ -31,6 +34,18 @@ internal sealed class GroupCommitProducer : IEventProducer, IAsyncDisposable
             AllowSynchronousContinuations = false,
         });
         _flushLoop = Task.Run(FlushLoopAsync);
+    }
+
+    public Task<long> AppendAsync<T>(
+        T value,
+        string? stream = null,
+        string? key = null,
+        IReadOnlyDictionary<string, string>? headers = null,
+        CancellationToken cancellationToken = default)
+    {
+        string type = typeof(T).Name;
+        byte[] payload = _serializer.Value.Serialize(value);
+        return AppendAsync(stream ?? type, EventData.FromBytes(type, payload, key, headers), cancellationToken);
     }
 
     public async Task<long> AppendAsync(string stream, EventData evt, CancellationToken ct = default)

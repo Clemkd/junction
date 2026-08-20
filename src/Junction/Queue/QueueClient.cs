@@ -9,12 +9,14 @@ internal sealed class QueueClient : IQueueClient
 {
     private readonly QueueCatalog _catalog;
     private readonly IJunctionConnectionSource _source;
+    private readonly QueuePayloadSerializer _serializer;
 
-    public QueueClient(QueueCatalog catalog, IJunctionConnectionSource source)
+    public QueueClient(QueueCatalog catalog, IJunctionConnectionSource source, QueuePayloadSerializer serializer)
     {
         _catalog = catalog;
         _source = source;
-        Producer = new QueueProducer(catalog, source);
+        _serializer = serializer;
+        Producer = new QueueProducer(catalog, source, serializer);
     }
 
     public IQueueProducer Producer { get; }
@@ -114,13 +116,13 @@ internal sealed class QueueClient : IQueueClient
     public IQueueClient Using(DbConnection connection, DbTransaction? transaction = null)
     {
         ArgumentNullException.ThrowIfNull(connection);
-        return new QueueClient(_catalog, new ExistingConnectionSource(connection, transaction));
+        return new QueueClient(_catalog, new ExistingConnectionSource(connection, transaction), _serializer);
     }
 
     public IQueueClient Using(DbContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return new QueueClient(_catalog, new EfCoreConnectionSource(context));
+        return new QueueClient(_catalog, new EfCoreConnectionSource(context), _serializer);
     }
 
     public async Task<IJunctionTransaction?> BeginTransactionAsync(CancellationToken cancellationToken = default) =>

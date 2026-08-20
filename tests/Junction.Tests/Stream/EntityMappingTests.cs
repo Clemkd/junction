@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Junction.Stream.Model;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,7 +28,9 @@ public sealed class EntityMappingTests(PostgresFixture fixture)
 
         await client.Producer.AppendAsync(stream, [
             EventData.FromText("First", "one", key: "k1"),
-            EventData.FromJson("Second", new { Id = 2 }, key: "k2", headers: new Dictionary<string, string> { ["h"] = "v" }),
+            EventData.FromBytes(
+                "Second", JsonSerializer.SerializeToUtf8Bytes(new { Id = 2 }),
+                key: "k2", headers: new Dictionary<string, string> { ["h"] = "v" }),
         ]);
 
         var consumer = client.GetConsumer(stream, "mapper");

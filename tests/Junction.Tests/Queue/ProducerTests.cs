@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Xunit;
 
 using Junction.Queue;
@@ -44,7 +45,9 @@ public sealed class ProducerTests(PostgresFixture fixture) : IAsyncDisposable
         var headers = new Dictionary<string, string> { ["tenant"] = "acme", ["trace"] = "abc" };
 
         await TestHelpers.WithClientAsync(_sp, c => c.Producer.EnqueueAsync(
-            queue, QueueMessageData.FromJson("Order", new { Id = 7, Total = 42.5m }, headers: headers)));
+            queue,
+            QueueMessageData.FromBytes(
+                "Order", JsonSerializer.SerializeToUtf8Bytes(new { Id = 7, Total = 42.5m }), headers: headers)));
 
         var message = await TestHelpers.WithClientAsync(_sp, c => c.GetConsumer(queue).ClaimAsync());
 

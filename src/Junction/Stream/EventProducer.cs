@@ -9,12 +9,25 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Junction.Stream;
 
-internal sealed class EventProducer(IDbContextFactory<JunctionDbContext> factory, StreamOptions options)
+internal sealed class EventProducer(
+    IDbContextFactory<JunctionDbContext> factory, StreamOptions options, StreamPayloadSerializer serializer)
     : IEventProducer
 {
     // Streams we've already created this process. Avoids the INSERT…ON CONFLICT round-trip on
     // every append (a stream can't be deleted in v1, so "exists" never becomes false).
     private readonly ConcurrentDictionary<string, byte> _ensuredStreams = new();
+
+    public Task<long> AppendAsync<T>(
+        T value,
+        string? stream = null,
+        string? key = null,
+        IReadOnlyDictionary<string, string>? headers = null,
+        CancellationToken cancellationToken = default)
+    {
+        string type = typeof(T).Name;
+        byte[] payload = serializer.Value.Serialize(value);
+        return AppendAsync(stream ?? type, EventData.FromBytes(type, payload, key, headers), cancellationToken);
+    }
 
     public async Task<long> AppendAsync(string stream, EventData evt, CancellationToken ct = default)
     {

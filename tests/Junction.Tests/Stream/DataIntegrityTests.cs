@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -59,7 +60,8 @@ public sealed class DataIntegrityTests(PostgresFixture fixture)
         var stream = PostgresFixture.NewName("json");
         var order = new Order(7, "ABC-123", 19.99m, new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
 
-        await client.Producer.AppendAsync(stream, EventData.FromJson("OrderPlaced", order, key: order.Sku));
+        await client.Producer.AppendAsync(
+            stream, EventData.FromBytes("OrderPlaced", JsonSerializer.SerializeToUtf8Bytes(order), key: order.Sku));
 
         var record = (await client.GetConsumer(stream, "r").PollAsync(1)).Records[0];
         Assert.Equal("OrderPlaced", record.Type);

@@ -22,10 +22,16 @@ public static class ServiceCollectionExtensions
     /// <c>AddStream</c>). Use <see cref="AddJunction{TContext}"/> instead when you want Queue
     /// completions to ride along with your own EF Core transaction.
     /// </summary>
+    /// <param name="queueSerializer">Serializer for the Queue module's typed handler API. Defaults to
+    /// <see cref="JsonPayloadSerializer"/>.</param>
+    /// <param name="streamSerializer">Serializer for the Stream module's typed consumer API. Defaults
+    /// to <see cref="JsonPayloadSerializer"/>.</param>
     public static IServiceCollection AddJunction(
         this IServiceCollection services,
         string connectionString,
-        Action<JunctionOptions>? configure = null)
+        Action<JunctionOptions>? configure = null,
+        IPayloadSerializer? queueSerializer = null,
+        IPayloadSerializer? streamSerializer = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
@@ -33,8 +39,8 @@ public static class ServiceCollectionExtensions
         var options = new JunctionOptions();
         configure?.Invoke(options);
 
-        services.AddQueue(connectionString, o => CopyQueueOptions(options.Queue, o));
-        services.AddStream(connectionString, o => CopyStreamOptions(options.Stream, o));
+        services.AddQueue(connectionString, o => CopyQueueOptions(options.Queue, o), queueSerializer);
+        services.AddStream(connectionString, o => CopyStreamOptions(options.Stream, o), streamSerializer);
         services.TryAddScoped<IJunctionClient, JunctionClient>();
 
         return services;
@@ -52,10 +58,16 @@ public static class ServiceCollectionExtensions
     /// (see <c>docs/DESIGN.md</c>), not silently papered over here.
     /// </para>
     /// </summary>
+    /// <param name="queueSerializer">Serializer for the Queue module's typed handler API. Defaults to
+    /// <see cref="JsonPayloadSerializer"/>.</param>
+    /// <param name="streamSerializer">Serializer for the Stream module's typed consumer API. Defaults
+    /// to <see cref="JsonPayloadSerializer"/>.</param>
     public static IServiceCollection AddJunction<TContext>(
         this IServiceCollection services,
         string connectionString,
-        Action<JunctionOptions>? configure = null)
+        Action<JunctionOptions>? configure = null,
+        IPayloadSerializer? queueSerializer = null,
+        IPayloadSerializer? streamSerializer = null)
         where TContext : DbContext
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -64,8 +76,8 @@ public static class ServiceCollectionExtensions
         var options = new JunctionOptions();
         configure?.Invoke(options);
 
-        services.AddQueue<TContext>(o => CopyQueueOptions(options.Queue, o));
-        services.AddStream(connectionString, o => CopyStreamOptions(options.Stream, o));
+        services.AddQueue<TContext>(o => CopyQueueOptions(options.Queue, o), queueSerializer);
+        services.AddStream(connectionString, o => CopyStreamOptions(options.Stream, o), streamSerializer);
         services.TryAddScoped<IJunctionClient, JunctionClient>();
 
         return services;

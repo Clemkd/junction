@@ -496,7 +496,7 @@ internal sealed class BatchMessageWorkerHost<THandler>(
 /// <summary>Drives an <see cref="IQueueMessageHandler{TMessage}"/> — deserializes the payload first.</summary>
 internal sealed class SingleTypedWorkerHost<THandler, TMessage>(
     IServiceProvider services, QueueOptions queueOptions, QueueWorkerOptions options,
-    IQueueWakeup wakeup, IPayloadSerializer serializer,
+    IQueueWakeup wakeup, QueuePayloadSerializer serializer,
     ILogger<SingleTypedWorkerHost<THandler, TMessage>> logger)
     : QueueWorkerHostBase<THandler>(services, queueOptions, options, wakeup, logger)
     where THandler : class, IQueueMessageHandler<TMessage>
@@ -508,13 +508,13 @@ internal sealed class SingleTypedWorkerHost<THandler, TMessage>(
     protected override Task DispatchAsync(
         IServiceProvider scope, IReadOnlyList<QueueMessage> messages, CancellationToken cancellationToken) =>
         scope.GetRequiredService<THandler>()
-            .HandleAsync(TypedPayload.Deserialize<TMessage>(serializer, messages[0]), cancellationToken);
+            .HandleAsync(TypedPayload.Deserialize<TMessage>(serializer.Value, messages[0]), cancellationToken);
 }
 
 /// <summary>Drives an <see cref="IQueueBatchHandler{TMessage}"/> — deserializes the whole batch first.</summary>
 internal sealed class BatchTypedWorkerHost<THandler, TMessage>(
     IServiceProvider services, QueueOptions queueOptions, QueueWorkerOptions options,
-    IQueueWakeup wakeup, IPayloadSerializer serializer,
+    IQueueWakeup wakeup, QueuePayloadSerializer serializer,
     ILogger<BatchTypedWorkerHost<THandler, TMessage>> logger)
     : QueueWorkerHostBase<THandler>(services, queueOptions, options, wakeup, logger)
     where THandler : class, IQueueBatchHandler<TMessage>
@@ -528,7 +528,7 @@ internal sealed class BatchTypedWorkerHost<THandler, TMessage>(
     {
         var entities = new List<TMessage>(messages.Count);
         foreach (var message in messages)
-            entities.Add(TypedPayload.Deserialize<TMessage>(serializer, message));
+            entities.Add(TypedPayload.Deserialize<TMessage>(serializer.Value, message));
         return scope.GetRequiredService<THandler>().HandleAsync(entities, cancellationToken);
     }
 }

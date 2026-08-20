@@ -23,9 +23,15 @@ public static class ServiceCollectionExtensions
     /// <c>modelBuilder.AddJunctionModel()</c> only if you want them in your migrations.
     /// </para>
     /// </summary>
+    /// <param name="serializer">
+    /// Serializer for the typed handler API (<see cref="IQueueMessageHandler{T}"/>,
+    /// <see cref="QueueHandler{T}"/>, <c>EnqueueAsync&lt;T&gt;</c>). Defaults to
+    /// <see cref="JsonPayloadSerializer"/>. Applies to this queue registration only.
+    /// </param>
     public static IServiceCollection AddQueue<TContext>(
         this IServiceCollection services,
-        Action<QueueOptions>? configure = null)
+        Action<QueueOptions>? configure = null,
+        IPayloadSerializer? serializer = null)
         where TContext : DbContext
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -34,7 +40,7 @@ public static class ServiceCollectionExtensions
             new EfCoreConnectionSource(sp.GetRequiredService<TContext>()));
 
         // The listener needs a connection of its own; borrow the context's connection string for it.
-        return AddCore(services, configure, sp =>
+        return AddCore(services, configure, serializer, sp =>
         {
             using var scope = sp.CreateScope();
             return scope.ServiceProvider.GetRequiredService<TContext>().Database.GetConnectionString();
@@ -48,10 +54,16 @@ public static class ServiceCollectionExtensions
     /// <see cref="IQueueClient.Using(System.Data.Common.DbConnection, System.Data.Common.DbTransaction?)"/>
     /// when you need that.
     /// </summary>
+    /// <param name="serializer">
+    /// Serializer for the typed handler API (<see cref="IQueueMessageHandler{T}"/>,
+    /// <see cref="QueueHandler{T}"/>, <c>EnqueueAsync&lt;T&gt;</c>). Defaults to
+    /// <see cref="JsonPayloadSerializer"/>. Applies to this queue registration only.
+    /// </param>
     public static IServiceCollection AddQueue(
         this IServiceCollection services,
         string connectionString,
-        Action<QueueOptions>? configure = null)
+        Action<QueueOptions>? configure = null,
+        IPayloadSerializer? serializer = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
@@ -62,7 +74,7 @@ public static class ServiceCollectionExtensions
         services.TryAddScoped<IJunctionConnectionSource>(sp =>
             new NpgsqlConnectionSource(sp.GetRequiredService<NpgsqlDataSource>()));
 
-        return AddCore(services, configure, _ => effectiveConnectionString);
+        return AddCore(services, configure, serializer, _ => effectiveConnectionString);
     }
 
     /// <summary>
@@ -180,6 +192,7 @@ public static class ServiceCollectionExtensions
     private static IServiceCollection AddCore(
         IServiceCollection services,
         Action<QueueOptions>? configure,
+        IPayloadSerializer? serializer,
         Func<IServiceProvider, string?> listenerConnectionString)
     {
         var options = new QueueOptions();
@@ -191,10 +204,11 @@ public static class ServiceCollectionExtensions
         // dispose it on teardown and silently kill every instrument for the rest of the process.
         services.AddSingleton(sp => new QueueCatalog(
             sp.GetRequiredService<QueueOptions>(), sp.GetService<QueueMetrics>()));
-        services.TryAddSingleton<IPayloadSerializer>(new JsonPayloadSerializer());
+        services.TryAddSingleton(new QueuePayloadSerializer(serializer ?? new JsonPayloadSerializer()));
         services.TryAddScoped<IQueueClient>(sp => new QueueClient(
             sp.GetRequiredService<QueueCatalog>(),
-            sp.GetRequiredService<IJunctionConnectionSource>()));
+            sp.GetRequiredService<IJunctionConnectionSource>(),
+            sp.GetRequiredService<QueuePayloadSerializer>()));
 
         services.AddSingleton(new QueueListenerConnection(listenerConnectionString));
 

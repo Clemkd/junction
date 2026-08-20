@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
@@ -139,7 +140,9 @@ public sealed class ConsumerHostTests(PostgresFixture fixture)
     private async Task ProduceOrdersAsync(string stream, int count)
     {
         await using var sp = fixture.BuildProvider();
-        var events = Enumerable.Range(0, count).Select(i => EventData.FromJson("OrderMsg", new OrderMsg(i))).ToList();
+        var events = Enumerable.Range(0, count)
+            .Select(i => EventData.FromBytes("OrderMsg", JsonSerializer.SerializeToUtf8Bytes(new OrderMsg(i))))
+            .ToList();
         await sp.GetRequiredService<IStreamClient>().Producer.AppendAsync(stream, events);
     }
 

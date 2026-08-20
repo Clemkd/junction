@@ -15,4 +15,16 @@ public interface IEventProducer
     /// assigned a contiguous offset range.
     /// </summary>
     Task<AppendResult> AppendAsync(string stream, IReadOnlyList<EventData> events, CancellationToken ct = default);
+
+    /// <summary>
+    /// Append <paramref name="value"/>, serialized by the module's <see cref="IPayloadSerializer"/>,
+    /// to the stream named after its type. Pass <paramref name="stream"/> to run a second stream for
+    /// the same type.
+    /// </summary>
+    Task<long> AppendAsync<T>(
+        T value,
+        string? stream = null,
+        string? key = null,
+        IReadOnlyDictionary<string, string>? headers = null,
+        CancellationToken cancellationToken = default);
 }

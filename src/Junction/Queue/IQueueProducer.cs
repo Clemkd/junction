@@ -48,4 +48,18 @@ public interface IQueueProducer
     /// </para>
     /// </summary>
     Task<long> EnqueueBulkAsync(string queue, IReadOnlyList<QueueMessageData> messages, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Enqueue <paramref name="value"/>, serialized by the module's <see cref="IPayloadSerializer"/>,
+    /// on the queue named after its type. Pass <paramref name="queue"/> to run a second queue for the
+    /// same type (e.g. a priority lane).
+    /// </summary>
+    Task<EnqueueResult> EnqueueAsync<T>(
+        T value,
+        string? queue = null,
+        int priority = 0,
+        TimeSpan delay = default,
+        string? dedupKey = null,
+        IReadOnlyDictionary<string, string>? headers = null,
+        CancellationToken cancellationToken = default);
 }

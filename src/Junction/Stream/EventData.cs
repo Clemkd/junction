@@ -1,11 +1,12 @@
 using System.Text;
-using System.Text.Json;
 
 namespace Junction.Stream;
 
 /// <summary>
-/// An event to append to a stream. Payload is treated as opaque bytes by the library;
-/// helper factories are provided for the common text/JSON cases.
+/// An event to append to a stream. The payload is opaque bytes to the library — use
+/// <see cref="FromText"/> or <see cref="FromBytes"/> to build one directly, or
+/// <see cref="IEventProducer.AppendAsync{T}"/> to have it built for you through the module's
+/// <see cref="IPayloadSerializer"/>.
 /// </summary>
 public sealed record EventData
 {
@@ -25,17 +26,6 @@ public sealed record EventData
     public static EventData FromText(string type, string text, string? key = null,
         IReadOnlyDictionary<string, string>? headers = null) =>
         new() { Type = type, Payload = Encoding.UTF8.GetBytes(text), Key = key, Headers = headers };
-
-    /// <summary>Create an event by JSON-serializing <paramref name="value"/>.</summary>
-    public static EventData FromJson<T>(string type, T value, string? key = null,
-        IReadOnlyDictionary<string, string>? headers = null) =>
-        new()
-        {
-            Type = type,
-            Payload = JsonSerializer.SerializeToUtf8Bytes(value),
-            Key = key,
-            Headers = headers,
-        };
 
     /// <summary>Create an event from raw bytes.</summary>
     public static EventData FromBytes(string type, ReadOnlyMemory<byte> payload, string? key = null,

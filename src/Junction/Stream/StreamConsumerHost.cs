@@ -140,7 +140,7 @@ internal sealed class BatchRecordConsumerHost<TConsumer>(
 
 /// <summary>Drives an <see cref="ISingleMessageConsumer{TMessage}"/> — deserializes each event to the entity.</summary>
 internal sealed class SingleTypedConsumerHost<TConsumer, TMessage>(
-    IServiceProvider services, IStreamClient client, IPayloadSerializer serializer,
+    IServiceProvider services, IStreamClient client, StreamPayloadSerializer serializer,
     StreamNotificationListener notifications,
     ILogger<SingleTypedConsumerHost<TConsumer, TMessage>> logger, ConsumerHostOptions options)
     : ConsumerHostBase<TConsumer>(services, client, notifications, logger, options)
@@ -152,14 +152,14 @@ internal sealed class SingleTypedConsumerHost<TConsumer, TMessage>(
     protected override Task ProcessBatchAsync(EventBatch batch, IEventConsumer consumer, CancellationToken ct) =>
         ForEachMessageAsync(batch, consumer, (sp, record, c) =>
         {
-            var value = serializer.Deserialize<TMessage>(record.Payload);
+            var value = serializer.Value.Deserialize<TMessage>(record.Payload);
             return sp.GetRequiredService<TConsumer>().ConsumeAsync(value, c);
         }, ct);
 }
 
 /// <summary>Drives an <see cref="IBatchMessageConsumer{TMessage}"/> — deserializes the batch to entities.</summary>
 internal sealed class BatchTypedConsumerHost<TConsumer, TMessage>(
-    IServiceProvider services, IStreamClient client, IPayloadSerializer serializer,
+    IServiceProvider services, IStreamClient client, StreamPayloadSerializer serializer,
     StreamNotificationListener notifications,
     ILogger<BatchTypedConsumerHost<TConsumer, TMessage>> logger, ConsumerHostOptions options)
     : ConsumerHostBase<TConsumer>(services, client, notifications, logger, options)
@@ -173,7 +173,7 @@ internal sealed class BatchTypedConsumerHost<TConsumer, TMessage>(
         {
             var entities = new List<TMessage>(batch.Records.Count);
             foreach (var record in batch.Records)
-                entities.Add(serializer.Deserialize<TMessage>(record.Payload));
+                entities.Add(serializer.Value.Deserialize<TMessage>(record.Payload));
             return sp.GetRequiredService<TConsumer>().ConsumeAsync(entities, c);
         }, ct);
 }
