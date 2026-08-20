@@ -32,11 +32,24 @@ Both modules share:
 - **`Junction.Queue.Internal.HeaderSerializer` and `Junction.Stream.HeaderSerializer` behave
   differently on absent headers**: Queue's `Deserialize` returns `null`, Stream's returns an empty
   dictionary. Match the module you're calling.
-- **The worker/consumer hosts differ in shape.** Queue drives handlers through a
-  claim → bounded-channel → N-processor pipeline with lease heartbeats and dead-lettering. Stream
-  drives consumers through a simpler poll → process → commit loop with no concurrency dispatch. Pick
-  concurrency accordingly: `QueueWorkerOptions.Concurrency` fans a queue out across N processors;
-  Stream consumers process one batch at a time per registered consumer class.
+
+## Concurrency: why Queue and Stream differ
+
+Queue messages are independent of each other: each is claimed and leased on its own, so N workers can
+hold and process N different messages at the same time with nothing to order between them.
+`QueueWorkerHostBase` runs a claim → bounded-channel → N-processor pipeline for exactly that reason,
+and `QueueWorkerOptions.Concurrency` controls how many processors run at once.
+
+Stream events are not independent: a stream is an ordered log with a single cursor, and the cursor
+only ever advances past events that have actually been handled. Fanning a batch out to concurrent
+processors and letting them finish in any order would mean either committing past an event that's
+still failing, or building a more general "advance to the highest fully-processed contiguous offset"
+scheme. `ConsumerHostBase` sidesteps that by processing a polled batch as one unit and committing once,
+rather than dispatching its events concurrently.
+
+That doesn't rule out parallelism within a batch: `IBatchMessageConsumer<T>`/`IBatchMessageConsumer`
+hand you the whole batch before the single commit, so you can process its events with your own
+`Task.WhenAll` (or any other in-process concurrency) inside the handler if the work benefits from it.
 
 ## Push delivery (LISTEN/NOTIFY)
 
@@ -44,6 +57,10 @@ Both modules support push delivery: idle workers/consumers wait on a PostgreSQL 
 polling on a fixed interval, so new work is picked up as soon as a producer commits, and an idle
 process issues no queries at all. It's advisory only — a missed notification simply falls back to the
 configured poll interval, so correctness never depends on it.
+
+Push delivery only shortens the idle wait. Claiming, polling, processing and committing all happen
+exactly the same way regardless of whether a `NOTIFY` or the poll interval is what woke the process up
+— there is no separate code path for "consuming a message that arrived via push."
 
 Enable it with `QueueOptions.EnableNotifications` / `StreamOptions.EnablePushDelivery` (the latter is
 on by default).
