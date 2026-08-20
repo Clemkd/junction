@@ -83,8 +83,8 @@ Only need one of the two? `Junction.Queue`'s `AddQueue`/`AddQueueWorker` and `Ju
 
 ## Documentation
 
-See [`docs/DESIGN.md`](docs/DESIGN.md) for architecture, configuration, and the reasoning behind
-what's shared between Queue and Stream versus kept deliberately separate.
+See [`docs/DESIGN.md`](docs/DESIGN.md) for architecture, configuration, serialization overrides, and
+running multiple queues/streams for the same type.
 
 ## License
 
