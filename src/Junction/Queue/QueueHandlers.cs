@@ -59,3 +59,19 @@ public interface IQueueBatchHandler<T> : IQueueHandlerDefinition
 
     Task HandleAsync(IReadOnlyList<T> messages, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Convenience base for a single-type <see cref="IQueueMessageHandler{T}"/>: <see cref="Queue"/>
+/// defaults to <c>typeof(T).Name</c>, so a handler for <c>Order</c> drains a queue named
+/// <c>"Order"</c> without stating it. Override <see cref="Queue"/> when you want several queues for
+/// the same type — e.g. a second, priority queue also carrying <c>Order</c> messages.
+/// </summary>
+/// <typeparam name="T">The domain type messages on this queue deserialize to.</typeparam>
+public abstract class QueueHandler<T> : IQueueMessageHandler<T>
+{
+    /// <inheritdoc/>
+    public virtual string Queue => typeof(T).Name;
+
+    /// <inheritdoc/>
+    public abstract Task HandleAsync(T message, CancellationToken cancellationToken = default);
+}

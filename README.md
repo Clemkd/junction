@@ -9,14 +9,19 @@ services.AddJunction<AppDbContext>(connectionString);
 
 ## Why
 
-Most backends eventually need both a **job queue** (send this email, exactly once) and an **event
-log** (record that this happened, let every subscriber react). Junction gives you both from one
-package, sharing one schema, one registration call, and one client — instead of running Kafka/RabbitMQ
-alongside Postgres, or hand-rolling either on top of raw SQL.
+Most backends eventually need both a **job queue** (send this email) and an **event log** (record
+that this happened, let every subscriber react). Junction gives you both from one package, sharing
+one schema, one registration call, and one client — instead of running Kafka/RabbitMQ alongside
+Postgres, or hand-rolling either on top of raw SQL.
 
-- **Queue** — fan-in. Many workers pull from one queue; each message is handled by exactly one of
-  them. `FOR UPDATE SKIP LOCKED` claims, fenced leases with heartbeats, retries with backoff, dead
-  letters, priorities, delays.
+It's built for teams who'd rather not operate a message broker for a handful of queues and streams —
+simplicity over raw throughput. If you're pushing tens of thousands of messages per second per queue,
+you want a dedicated broker; if you want reliable background jobs and an event log without adding
+infrastructure, that's the trade Junction makes.
+
+- **Queue** — fan-in. Many workers pull from one queue; each message is handled by one of them.
+  `FOR UPDATE SKIP LOCKED` claims, fenced leases with heartbeats, retries with backoff, dead letters,
+  priorities, delays.
 - **Stream** — fan-out. Every consumer sees every event, each with its own durable, replayable cursor.
   At-least-once delivery, crash recovery, push delivery via `LISTEN`/`NOTIFY`.
 
@@ -36,38 +41,34 @@ builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
 builder.Services.AddJunction<AppDbContext>(connectionString);
 ```
 
-**Queue** — enqueue work, handle it in a background worker:
+**Queue** — enqueue a plain object, handle it in a background worker. The queue name defaults to the
+type name (here, `"Order"`); override it if you want several queues for the same type.
 
 ```csharp
-await junction.Queue.Producer.EnqueueAsync("emails",
-    QueueMessageData.FromJson("SendInvoice", new { OrderId = 42 }));
+await junction.Queue.Producer.EnqueueAsync(new Order { Id = 42 });
 
-public sealed class SendInvoiceHandler : IQueueMessageHandler
+public sealed class OrderHandler : QueueHandler<Order>
 {
-    public string Queue => "emails";
-
-    public Task HandleAsync(QueueMessage message, CancellationToken ct)
+    public override Task HandleAsync(Order order, CancellationToken ct)
     {
-        // ... send the email ...
+        // ... process the order ...
         return Task.CompletedTask; // returning acknowledges; throwing retries, then dead-letters
     }
 }
 
-builder.Services.AddJunctionQueueWorker<SendInvoiceHandler>();
+builder.Services.AddJunctionQueueWorker<OrderHandler>();
 ```
 
-**Stream** — append events, react to them from as many independent consumers as you like:
+**Stream** — append events, react to them from as many independent consumers as you like. The stream
+name defaults to the type name; `ConsumerName` defaults to the consumer class's own name, so each
+consumer class reading the same stream gets its own cursor automatically.
 
 ```csharp
-await junction.Stream.Producer.AppendAsync("orders",
-    EventData.FromJson("OrderPlaced", new { OrderId = 42 }));
+await junction.Stream.Producer.AppendAsync(new OrderPlaced { OrderId = 42 });
 
-public sealed class BillingConsumer : ISingleMessageConsumer
+public sealed class BillingConsumer : StreamConsumer<OrderPlaced>
 {
-    public string Stream => "orders";
-    public string ConsumerName => "billing";
-
-    public Task ConsumeAsync(EventRecord message, CancellationToken ct)
+    public override Task ConsumeAsync(OrderPlaced e, CancellationToken ct)
     {
         // ... react to the event ...
         return Task.CompletedTask; // commits the cursor; throwing redelivers this event

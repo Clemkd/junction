@@ -5,7 +5,7 @@
     <RootNamespace>Junction</RootNamespace>
     <AssemblyName>Junction</AssemblyName>
     <PackageId>Junction</PackageId>
-    <Description>PostgreSQL-native messaging for .NET, one coherent API: a competing-consumer work queue (fan-in, exactly-once processing via FOR UPDATE SKIP LOCKED and fenced leases) and a Kafka-inspired durable event stream (fan-out, per-consumer durable cursors, replay). No broker required — runs on your existing connection.</Description>
+    <Description>PostgreSQL-native messaging for .NET, one coherent API: a competing-consumer work queue (fan-in, FOR UPDATE SKIP LOCKED claims with fenced leases) and a Kafka-inspired durable event stream (fan-out, per-consumer durable cursors, replay). No broker required — runs on your existing connection.</Description>
     <Authors>Acorel</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>

@@ -52,6 +52,33 @@ dispatch. The common surface (`BackgroundService`, resolving identity from a pro
 error-retry-delay loop) is thin relative to how different the rest is, so each module keeps its own
 hierarchy.
 
+## Typed handlers and naming conventions
+
+`IQueueMessageHandler<T>` and `ISingleMessageConsumer<T>` require you to state the queue/stream
+(and, for streams, the consumer name) explicitly — there's no reflection or attribute magic deciding
+it for you. `QueueHandler<T>` and `StreamConsumer<T>` are thin abstract bases that default those names
+from `T` and the handler's own type, since "one queue/stream per business type" is the common case:
+
+- `QueueHandler<T>.Queue` defaults to `typeof(T).Name` — override it to run a second queue for the
+  same type (e.g. a priority lane carrying the same `Order` shape).
+- `StreamConsumer<T>.Stream` defaults to `typeof(T).Name`; `ConsumerName` defaults to `GetType().Name`
+  — so two consumer classes reading the same stream get two independent cursors without either naming
+  the other.
+
+Nothing about these bases is special to the framework: `QueueHandler<Order>` and `StreamConsumer<T>`
+are ordinary generic classes implementing the existing typed interfaces, registered the same way
+(`AddJunctionQueueWorker<TConcreteHandler>()` / `AddJunctionStreamConsumer<TConcreteConsumer>()`) —
+`THandler`/`TConsumer` must be a closed type at the registration call site (e.g. `OrderHandler`, not
+an open `QueueHandler<>`), same requirement as any other generic DI registration.
+
+`IQueueProducer.EnqueueAsync<T>(value, queue: null, ...)` and
+`IEventProducer.AppendAsync<T>(value, stream: null, ...)` are the matching producer-side convenience:
+they JSON-serialize `value` and default the queue/stream name (and the message/event `Type`) to
+`typeof(T).Name`, so `producer.EnqueueAsync(new Order { Id = 42 })` needs no `QueueMessageData`/
+`EventData` built by hand. The lower-level `EnqueueAsync(string queue, QueueMessageData, ...)` /
+`AppendAsync(string stream, EventData, ...)` overloads are still there for anything that doesn't fit
+the "one queue per type" default — non-JSON payloads, per-message priority/delay/dedup key, etc.
+
 ## Configuration
 
 `JunctionOptions` composes `Queue` (`QueueOptions`) and `Stream` (`StreamOptions`) unchanged — nothing

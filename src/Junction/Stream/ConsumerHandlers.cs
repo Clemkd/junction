@@ -72,3 +72,23 @@ public interface IBatchMessageConsumer<T> : IStreamConsumerDefinition
     /// <summary>Process a batch of deserialized entities (never empty).</summary>
     Task ConsumeAsync(IReadOnlyList<T> messages, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Convenience base for a single-type <see cref="ISingleMessageConsumer{T}"/>: <see cref="Stream"/>
+/// defaults to <c>typeof(T).Name</c> (a consumer of <c>Order</c> reads the <c>"Order"</c> stream
+/// without stating it) and <see cref="ConsumerName"/> defaults to the consumer class's own name — so
+/// two different consumer classes reading the same stream naturally get two independent cursors.
+/// Override either when the defaults collide with something else.
+/// </summary>
+/// <typeparam name="T">The domain type events on this stream deserialize to.</typeparam>
+public abstract class StreamConsumer<T> : ISingleMessageConsumer<T>
+{
+    /// <inheritdoc/>
+    public virtual string Stream => typeof(T).Name;
+
+    /// <inheritdoc/>
+    public virtual string ConsumerName => GetType().Name;
+
+    /// <inheritdoc/>
+    public abstract Task ConsumeAsync(T message, CancellationToken cancellationToken = default);
+}
