@@ -1,0 +1,138 @@
+using System.Data;
+using System.Data.Common;
+using Junction.Stream.Internal;
+using Microsoft.EntityFrameworkCore;
+
+namespace Junction.Stream;
+
+internal sealed class StreamClient(
+    IDbContextFactory<JunctionDbContext> factory,
+    IEventProducer producer,
+    StreamNotificationListener notifications,
+    StreamOptions options) : IStreamClient
+{
+    private readonly SemaphoreSlim _initGate = new(1, 1);
+    private volatile bool _initialized;
+
+    public IEventProducer Producer { get; } = producer;
+
+    public IEventConsumer GetConsumer(string stream, string consumerName) =>
+        new EventConsumer(factory, stream, consumerName, notifications);
+
+    public async Task InitializeAsync(CancellationToken ct = default)
+    {
+        if (_initialized || !options.AutoCreateSchema)
+            return;
+
+        // Guard against concurrent EnsureCreated calls from multiple hosted consumers.
+        await _initGate.WaitAsync(ct);
+        try
+        {
+            if (_initialized)
+                return;
+            await using var ctx = await factory.CreateDbContextAsync(ct);
+            await ctx.Database.EnsureCreatedAsync(ct);
+            _initialized = true;
+        }
+        finally
+        {
+            _initGate.Release();
+        }
+    }
+
+    public async Task EnsureStreamAsync(string stream, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(stream);
+        await using var ctx = await factory.CreateDbContextAsync(ct);
+        await StreamOps.EnsureStreamAsync(ctx, stream, ct);
+    }
+
+    public async Task<IReadOnlyList<string>> ListStreamsAsync(CancellationToken ct = default)
+    {
+        await using var ctx = await factory.CreateDbContextAsync(ct);
+        return await ctx.Streams.OrderBy(s => s.Name).Select(s => s.Name).ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<string>> ListConsumersAsync(string stream, CancellationToken ct = default)
+    {
+        await using var ctx = await factory.CreateDbContextAsync(ct);
+        var id = await StreamOps.TryGetStreamIdAsync(ctx, stream, ct);
+        if (id is null)
+            return [];
+        return await ctx.Cursors.Where(c => c.StreamId == id)
+            .OrderBy(c => c.ConsumerName)
+            .Select(c => c.ConsumerName)
+            .ToListAsync(ct);
+    }
+
+    public async Task<ConsumerLag> GetConsumerLagAsync(string stream, string consumerName, CancellationToken ct = default)
+    {
+        await using var ctx = await factory.CreateDbContextAsync(ct);
+        long id = await StreamOps.GetRequiredStreamIdAsync(ctx, stream, ct);
+        long end = await ctx.Streams.Where(s => s.Id == id).Select(s => s.NextSequence).SingleAsync(ct);
+        long pos = await ctx.Cursors.Where(c => c.StreamId == id && c.ConsumerName == consumerName)
+            .Select(c => (long?)c.Position).FirstOrDefaultAsync(ct) ?? 0;
+        return new ConsumerLag(stream, consumerName, pos, end);
+    }
+
+    public async Task<StreamStats> GetStreamStatsAsync(string stream, CancellationToken ct = default)
+    {
+        await using var ctx = await factory.CreateDbContextAsync(ct);
+        long id = await StreamOps.GetRequiredStreamIdAsync(ctx, stream, ct);
+        long next = await ctx.Streams.Where(s => s.Id == id).Select(s => s.NextSequence).SingleAsync(ct);
+
+        await using var cmd = await CreateCommandAsync(ctx, ct);
+        cmd.CommandText =
+            """
+            SELECT count(*), min(seq), max(seq), coalesce(sum(octet_length(payload)), 0),
+                   min(created_at), max(created_at)
+            FROM junction.stream_events WHERE stream_id = @id
+            """;
+        AddParam(cmd, "id", id);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await reader.ReadAsync(ct);
+        return new StreamStats
+        {
+            Stream = stream,
+            EventCount = reader.GetInt64(0),
+            MinOffset = reader.IsDBNull(1) ? null : reader.GetInt64(1),
+            MaxOffset = reader.IsDBNull(2) ? null : reader.GetInt64(2),
+            NextOffset = next,
+            PayloadBytes = reader.GetInt64(3),
+            FirstTimestamp = reader.IsDBNull(4) ? null : reader.GetDateTime(4),
+            LastTimestamp = reader.IsDBNull(5) ? null : reader.GetDateTime(5),
+        };
+    }
+
+    public async Task<StorageStats> GetStorageStatsAsync(CancellationToken ct = default)
+    {
+        await using var ctx = await factory.CreateDbContextAsync(ct);
+        await using var cmd = await CreateCommandAsync(ctx, ct);
+        cmd.CommandText =
+            """
+            SELECT pg_total_relation_size('junction.stream_events'),
+                   pg_table_size('junction.stream_events'),
+                   pg_indexes_size('junction.stream_events')
+            """;
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await reader.ReadAsync(ct);
+        return new StorageStats(reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2));
+    }
+
+    private static async Task<DbCommand> CreateCommandAsync(JunctionDbContext ctx, CancellationToken ct)
+    {
+        var conn = ctx.Database.GetDbConnection();
+        if (conn.State != ConnectionState.Open)
+            await conn.OpenAsync(ct);
+        return conn.CreateCommand();
+    }
+
+    private static void AddParam(DbCommand cmd, string name, object value)
+    {
+        var p = cmd.CreateParameter();
+        p.ParameterName = name;
+        p.Value = value;
+        cmd.Parameters.Add(p);
+    }
+}
