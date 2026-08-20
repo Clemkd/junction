@@ -3,6 +3,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
 
+using Junction.Stream;
+
 namespace Junction.Tests.Stream;
 
 /// <summary>

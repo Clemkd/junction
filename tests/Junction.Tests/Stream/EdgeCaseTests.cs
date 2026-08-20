@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
+using Junction.Stream;
+
 namespace Junction.Tests.Stream;
 
 /// <summary>Argument validation and boundary behaviour of the public API.</summary>

@@ -1,4 +1,6 @@
+using Junction;
 using Junction.Connectors;
+using Junction.Internal;
 using Junction.Queue.Internal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,15 +56,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
-        // Every statement in the hot path is the same handful of texts repeated forever, so let the
-        // server prepare them: parse and plan are pure overhead once the shape is known.
-        var builder = new NpgsqlConnectionStringBuilder(connectionString);
-        if (builder.MaxAutoPrepare <= 0)
-        {
-            builder.MaxAutoPrepare = 32;
-            builder.AutoPrepareMinUsages = 2;
-        }
-        string effectiveConnectionString = builder.ConnectionString;
+        string effectiveConnectionString = NpgsqlConnectionStrings.EnableAutoPrepare(connectionString);
 
         services.TryAddSingleton(_ => NpgsqlDataSource.Create(effectiveConnectionString));
         services.TryAddScoped<IJunctionConnectionSource>(sp =>
@@ -197,7 +191,7 @@ public static class ServiceCollectionExtensions
         // dispose it on teardown and silently kill every instrument for the rest of the process.
         services.AddSingleton(sp => new QueueCatalog(
             sp.GetRequiredService<QueueOptions>(), sp.GetService<QueueMetrics>()));
-        services.TryAddSingleton<IMessageSerializer>(new JsonMessageSerializer());
+        services.TryAddSingleton<IPayloadSerializer>(new JsonPayloadSerializer());
         services.TryAddScoped<IQueueClient>(sp => new QueueClient(
             sp.GetRequiredService<QueueCatalog>(),
             sp.GetRequiredService<IJunctionConnectionSource>()));

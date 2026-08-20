@@ -1,3 +1,5 @@
+using Junction.Stream;
+
 namespace Junction.Tests.Stream;
 
 internal static class TestHelpers

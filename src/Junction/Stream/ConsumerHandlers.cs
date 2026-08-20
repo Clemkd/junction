@@ -46,7 +46,7 @@ public interface IBatchMessageConsumer : IStreamConsumerDefinition
 
 /// <summary>
 /// Typed single-message consumer: receives the <b>business entity</b> <typeparamref name="T"/>
-/// (deserialized from the event payload by the registered <see cref="IEventSerializer"/>) instead
+/// (deserialized from the event payload by the registered <see cref="IPayloadSerializer"/>) instead
 /// of a Junction <see cref="EventRecord"/>. Commit semantics match
 /// <see cref="ISingleMessageConsumer"/> (committed after each message).
 /// </summary>
@@ -59,7 +59,7 @@ public interface ISingleMessageConsumer<in T> : IStreamConsumerDefinition
 
 /// <summary>
 /// Typed batch consumer: receives a batch of <b>business entities</b> <typeparamref name="T"/>
-/// (deserialized by the registered <see cref="IEventSerializer"/>) instead of
+/// (deserialized by the registered <see cref="IPayloadSerializer"/>) instead of
 /// <see cref="EventRecord"/>s. <see cref="BatchSize"/> is owned by the implementing class
 /// (typically set in its constructor). The whole batch is committed as one unit.
 /// </summary>

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Threading.Channels;
+using Junction;
 using Junction.Connectors;
 using Junction.Queue.Internal;
 using Microsoft.Extensions.DependencyInjection;
@@ -495,7 +496,7 @@ internal sealed class BatchMessageWorkerHost<THandler>(
 /// <summary>Drives an <see cref="IQueueMessageHandler{TMessage}"/> — deserializes the payload first.</summary>
 internal sealed class SingleTypedWorkerHost<THandler, TMessage>(
     IServiceProvider services, QueueOptions queueOptions, QueueWorkerOptions options,
-    IQueueWakeup wakeup, IMessageSerializer serializer,
+    IQueueWakeup wakeup, IPayloadSerializer serializer,
     ILogger<SingleTypedWorkerHost<THandler, TMessage>> logger)
     : QueueWorkerHostBase<THandler>(services, queueOptions, options, wakeup, logger)
     where THandler : class, IQueueMessageHandler<TMessage>
@@ -513,7 +514,7 @@ internal sealed class SingleTypedWorkerHost<THandler, TMessage>(
 /// <summary>Drives an <see cref="IQueueBatchHandler{TMessage}"/> — deserializes the whole batch first.</summary>
 internal sealed class BatchTypedWorkerHost<THandler, TMessage>(
     IServiceProvider services, QueueOptions queueOptions, QueueWorkerOptions options,
-    IQueueWakeup wakeup, IMessageSerializer serializer,
+    IQueueWakeup wakeup, IPayloadSerializer serializer,
     ILogger<BatchTypedWorkerHost<THandler, TMessage>> logger)
     : QueueWorkerHostBase<THandler>(services, queueOptions, options, wakeup, logger)
     where THandler : class, IQueueBatchHandler<TMessage>
@@ -538,7 +539,7 @@ internal static class TypedPayload
     /// A payload that will not deserialize will not deserialize on the next attempt either, so it is
     /// dead-lettered immediately rather than retried until its budget runs out.
     /// </summary>
-    public static T Deserialize<T>(IMessageSerializer serializer, QueueMessage message)
+    public static T Deserialize<T>(IPayloadSerializer serializer, QueueMessage message)
     {
         try
         {

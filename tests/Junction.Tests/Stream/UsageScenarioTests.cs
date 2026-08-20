@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
+using Junction.Stream;
+
 namespace Junction.Tests.Stream;
 
 /// <summary>End-to-end scenarios mirroring how the library is actually used.</summary>

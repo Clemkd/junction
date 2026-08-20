@@ -2,6 +2,8 @@ using Junction.Queue.Model;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
+using Junction.Queue;
+
 namespace Junction.Tests.Queue;
 
 /// <summary>

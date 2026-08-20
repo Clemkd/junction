@@ -4,6 +4,8 @@ using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
 
+using Junction.Queue;
+
 namespace Junction.Tests.Queue;
 
 /// <summary>

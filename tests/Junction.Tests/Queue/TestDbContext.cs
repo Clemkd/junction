@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 
+using Junction.Queue;
+
 namespace Junction.Tests.Queue;
 
 /// <summary>Stands in for the application's own context — the connection Junction borrows.</summary>

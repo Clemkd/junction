@@ -38,7 +38,7 @@ public interface IQueueBatchHandler : IQueueHandlerDefinition
 
 /// <summary>
 /// Typed single-message handler: receives the <b>business entity</b> <typeparamref name="T"/>
-/// (deserialized from the payload by the registered <see cref="IMessageSerializer"/>) instead of a
+/// (deserialized from the payload by the registered <see cref="IPayloadSerializer"/>) instead of a
 /// Junction <see cref="QueueMessage"/>.
 /// </summary>
 /// <typeparam name="T">The domain type messages on this queue deserialize to.</typeparam>

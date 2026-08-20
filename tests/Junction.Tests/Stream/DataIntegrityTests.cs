@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
+using Junction.Stream;
+
 namespace Junction.Tests.Stream;
 
 /// <summary>Payloads, keys and headers must survive both the EF and the bulk-COPY write paths intact.</summary>

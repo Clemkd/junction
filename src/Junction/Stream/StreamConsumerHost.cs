@@ -1,3 +1,4 @@
+using Junction;
 using Junction.Stream.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -139,7 +140,7 @@ internal sealed class BatchRecordConsumerHost<TConsumer>(
 
 /// <summary>Drives an <see cref="ISingleMessageConsumer{TMessage}"/> — deserializes each event to the entity.</summary>
 internal sealed class SingleTypedConsumerHost<TConsumer, TMessage>(
-    IServiceProvider services, IStreamClient client, IEventSerializer serializer,
+    IServiceProvider services, IStreamClient client, IPayloadSerializer serializer,
     StreamNotificationListener notifications,
     ILogger<SingleTypedConsumerHost<TConsumer, TMessage>> logger, ConsumerHostOptions options)
     : ConsumerHostBase<TConsumer>(services, client, notifications, logger, options)
@@ -158,7 +159,7 @@ internal sealed class SingleTypedConsumerHost<TConsumer, TMessage>(
 
 /// <summary>Drives an <see cref="IBatchMessageConsumer{TMessage}"/> — deserializes the batch to entities.</summary>
 internal sealed class BatchTypedConsumerHost<TConsumer, TMessage>(
-    IServiceProvider services, IStreamClient client, IEventSerializer serializer,
+    IServiceProvider services, IStreamClient client, IPayloadSerializer serializer,
     StreamNotificationListener notifications,
     ILogger<BatchTypedConsumerHost<TConsumer, TMessage>> logger, ConsumerHostOptions options)
     : ConsumerHostBase<TConsumer>(services, client, notifications, logger, options)

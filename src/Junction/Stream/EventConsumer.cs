@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Junction.Internal;
 using Junction.Stream.Internal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -34,7 +35,7 @@ internal sealed class EventConsumer : IEventConsumer
     private long _position;
     private bool _loaded;
 
-    private StreamSignal? _signal;
+    private ChannelSignal? _signal;
     private Task? _wake;
 
     public EventConsumer(IDbContextFactory<JunctionDbContext> factory, string stream, string name,

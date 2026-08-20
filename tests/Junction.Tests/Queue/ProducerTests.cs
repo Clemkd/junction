@@ -1,5 +1,7 @@
 using Xunit;
 
+using Junction.Queue;
+
 namespace Junction.Tests.Queue;
 
 [Collection("postgres-queue")]

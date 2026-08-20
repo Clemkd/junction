@@ -2,6 +2,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.PostgreSql;
 using Xunit;
 
+using Junction.Stream;
+
 namespace Junction.Tests.Stream;
 
 /// <summary>

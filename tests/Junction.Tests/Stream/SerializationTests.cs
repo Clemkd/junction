@@ -1,6 +1,9 @@
 using System.Text;
 using Xunit;
 
+using Junction;
+using Junction.Stream;
+
 namespace Junction.Tests.Stream;
 
 public sealed class SerializationTests
@@ -8,18 +11,18 @@ public sealed class SerializationTests
     private sealed record Order(int Id, string Name);
 
     [Fact]
-    public void JsonEventSerializer_round_trips()
+    public void JsonPayloadSerializer_round_trips()
     {
-        var serializer = new JsonEventSerializer();
+        var serializer = new JsonPayloadSerializer();
         var bytes = serializer.Serialize(new Order(1, "widget"));
         var back = serializer.Deserialize<Order>(bytes);
         Assert.Equal(new Order(1, "widget"), back);
     }
 
     [Fact]
-    public void JsonEventSerializer_deserialize_null_throws()
+    public void JsonPayloadSerializer_deserialize_null_throws()
     {
-        var serializer = new JsonEventSerializer();
+        var serializer = new JsonPayloadSerializer();
         var nullPayload = Encoding.UTF8.GetBytes("null");
         Assert.Throws<InvalidOperationException>(() => serializer.Deserialize<Order>(nullPayload));
     }
@@ -37,7 +40,7 @@ public sealed class SerializationTests
     public void EventData_FromJson_serializes_payload()
     {
         var evt = EventData.FromJson("T", new Order(7, "x"));
-        var order = new JsonEventSerializer().Deserialize<Order>(evt.Payload);
+        var order = new JsonPayloadSerializer().Deserialize<Order>(evt.Payload);
         Assert.Equal(new Order(7, "x"), order);
     }
 

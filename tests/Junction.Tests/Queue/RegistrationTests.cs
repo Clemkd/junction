@@ -1,7 +1,10 @@
+using Junction;
 using Junction.Queue.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
+
+using Junction.Queue;
 
 namespace Junction.Tests.Queue;
 
@@ -54,7 +57,7 @@ public sealed class RegistrationTests
 
         Assert.NotNull(client.Producer);
         Assert.NotNull(client.GetConsumer("q"));
-        Assert.NotNull(provider.GetRequiredService<IMessageSerializer>());
+        Assert.NotNull(provider.GetRequiredService<IPayloadSerializer>());
         Assert.NotNull(provider.GetRequiredService<IQueueWakeup>());
     }
 

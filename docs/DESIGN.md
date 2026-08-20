@@ -28,8 +28,28 @@ happens **above** them:
 - **One registration surface, one façade.** `AddJunction(...)` / `AddJunction<TContext>(...)` wire up
   both modules together; `IJunctionClient` exposes them as `.Queue` and `.Stream`. Each module also
   has its own standalone registration (`AddQueue`, `AddStream`) for processes that only need one.
+- **One LISTEN/NOTIFY engine.** `Junction.Internal.PostgresChannelListener` is the shared primitive
+  behind push delivery in both modules — see below.
+- **One connection-string tuning helper.** `Junction.Internal.NpgsqlConnectionStrings.EnableAutoPrepare`
+  is the auto-prepare tuning both modules' standalone (`AddQueue(connectionString)` /
+  `AddStream(connectionString)`) registrations apply.
+- **One payload serializer abstraction.** `Junction.IPayloadSerializer` / `JsonPayloadSerializer`
+  back both modules' typed handlers (`IQueueMessageHandler<T>`, `ISingleMessageConsumer<T>`, …) — each
+  module still resolves its own instance from the container, so you can register a different
+  serializer for Queue than for Stream if you need to, but the default (JSON) and the contract are one
+  type, not two identical ones.
 
-## Known limitations
+## What stayed separate, and why
+
+**The worker/consumer hosts are not shared.** `Junction.Queue.QueueWorkerHostBase<T>` runs a
+claim → bounded-channel → N-processor pipeline with lease heartbeats and dead-lettering.
+`Junction.Stream.ConsumerHostBase<T>` runs a simpler poll → process → commit loop with no concurrency
+dispatch. The common surface (`BackgroundService`, resolving identity from a probe instance, an
+error-retry-delay loop) is thin relative to how different the rest is — and unlike the notify listener
+below, this code *is* the delivery guarantee (lease correctness, at-least-once semantics), so a
+speculative shared base isn't worth the risk it would introduce for a modest amount of shared
+boilerplate. Revisit once real usage shows the two hosts drifting in ways that would benefit from a
+common base, not just because they look similar today.
 
 **`AddJunction<TContext>()` needs the connection string explicitly**, even though `TContext` already
 has one. Queue's EF-context registration resolves its connection lazily (on first use, through the
@@ -37,20 +57,45 @@ DI-resolved `TContext`); Stream's registration builds a pooled `IDbContextFactor
 registration time and has no lazy-resolution path yet. Until Stream gains one (EF Core's
 `AddPooledDbContextFactory(Action<IServiceProvider, DbContextOptionsBuilder>)` overload would do it),
 `AddJunction<TContext>(connectionString, ...)` takes the string explicitly: Queue borrows `TContext`'s
-connection, Stream gets its own pool built from the string you pass.
+connection, Stream gets its own pool built from the string you pass. This is a missing capability in
+Stream's registration, not really a "shared code" question, so it doesn't fit the LISTEN/NOTIFY-style
+extraction below.
 
-**The LISTEN/NOTIFY listeners are not shared.** `Junction.Queue.Internal.PostgresListenerWakeup` is a
-`BackgroundService` started eagerly when `QueueOptions.EnableNotifications` is on, signaling by queue
-name. `Junction.Stream.Internal.StreamNotificationListener` lazily starts its own listen loop on first
-subscribe, and additionally does advisory-lock-based duplicate-consumer diagnostics that Queue has no
-equivalent of. Each module today opens its own dedicated connection for this rather than sharing one.
+**`Junction.Queue.Internal.HeaderSerializer` and `Junction.Stream.HeaderSerializer` stay two files.**
+Their `Serialize` halves are identical, but `Deserialize` isn't: Queue returns `null` for absent
+headers, Stream returns a shared empty dictionary. Collapsing them into one shared implementation
+means picking one behavior and checking every call site tolerates it — for ~15 lines of duplication,
+not worth the risk of a silent behavior change neither a compiler nor a test run here could catch.
 
-**The worker/consumer hosts are not shared.** `Junction.Queue.QueueWorkerHostBase<T>` runs a
-claim → bounded-channel → N-processor pipeline with lease heartbeats and dead-lettering.
-`Junction.Stream.ConsumerHostBase<T>` runs a simpler poll → process → commit loop with no concurrency
-dispatch. The common surface (`BackgroundService`, resolving identity from a probe instance, an
-error-retry-delay loop) is thin relative to how different the rest is, so each module keeps its own
-hierarchy.
+## The shared LISTEN/NOTIFY engine
+
+Push delivery in both modules follows the same shape — one dedicated, non-pooled connection `LISTEN`s
+on a channel, producers `NOTIFY` it inside their write transaction, and idle workers/consumers wait on
+a per-key token instead of a plain poll interval — so the mechanics (open the connection, dispatch
+notifications to the right waiter, reconnect with backoff, wake everyone on disconnect so nobody stays
+parked on a dead socket) live in one place: `Junction.Internal.PostgresChannelListener`.
+
+What's still module-specific sits *above* that shared engine, as a thin adapter each way:
+
+- `Junction.Queue.Internal.PostgresListenerWakeup` wraps it as a `BackgroundService` (started eagerly
+  when `QueueOptions.EnableNotifications` is on), keyed by queue name.
+- `Junction.Stream.Internal.StreamNotificationListener` wraps it lazily (started on first `Subscribe`/
+  `ClaimCursor`), keyed by stream name, and layers its own advisory-lock-based duplicate-consumer
+  diagnostics on top via the listener's `onIdleCheck`/`onConnected` hooks — logic with no equivalent
+  in Queue, so it stays in Stream's adapter rather than in the shared primitive.
+
+This was safe to centralize precisely because push delivery is documented as advisory in both modules
+— a missed notification only costs latency (the poll fallback picks it up), never correctness — unlike
+the worker/consumer hosts above, where the same kind of merge would touch the actual delivery
+guarantees.
+
+One small behavior change came along with sharing the engine: Queue's wake tokens are now persistent
+and re-armable per key (`ChannelSignal`, the same design Stream's `StreamSignal` already used), where
+Queue previously created and discarded a `TaskCompletionSource` per wait cycle. In practice this means
+the shared listener holds one long-lived entry per *distinct queue name ever waited on* — the same
+shape Stream already had for stream names — rather than churning dictionary entries per wait. Queue
+names are a small, application-defined set, so this trades a little memory for fewer allocations; it
+does not change what a caller observes.
 
 ## Typed handlers and naming conventions
 
@@ -101,8 +146,6 @@ services.AddJunction<AppDbContext>(connectionString, o =>
 - Retrofitting Queue's bulk-enqueue path (raw binary `COPY`, no extra dependency) onto BulkForge for
   consistency with Stream's bulk-append path — a deliberate choice to keep Queue dependency-free,
   revisited only if that trade-off changes.
-- Deduplicating the two near-identical `HeaderSerializer` implementations
-  (`Junction.Queue.Internal.HeaderSerializer` and `Junction.Stream.HeaderSerializer`).
 
 ## Verifying a build
 

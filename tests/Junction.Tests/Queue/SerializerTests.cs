@@ -1,10 +1,13 @@
 using System.Text.Json;
 using Xunit;
 
+using Junction;
+using Junction.Queue;
+
 namespace Junction.Tests.Queue;
 
 /// <summary>
-/// The default <see cref="IMessageSerializer"/>. It is what typed handlers use to turn a payload into a
+/// The default <see cref="IPayloadSerializer"/>. It is what typed handlers use to turn a payload into a
 /// business object, so its contract is narrow but load-bearing: round-trip fidelity, the caller's
 /// <see cref="JsonSerializerOptions"/> honoured, and a payload that cannot produce a value reported
 /// rather than handed over as null.
@@ -16,7 +19,7 @@ public sealed class SerializerTests
     [Fact]
     public void A_value_survives_the_round_trip()
     {
-        var serializer = new JsonMessageSerializer();
+        var serializer = new JsonPayloadSerializer();
         var order = new Order(42, "widgets");
 
         var payload = serializer.Serialize(order);
@@ -28,7 +31,7 @@ public sealed class SerializerTests
     public void The_callers_json_options_are_used_on_both_sides()
     {
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
-        var serializer = new JsonMessageSerializer(options);
+        var serializer = new JsonPayloadSerializer(options);
 
         var payload = serializer.Serialize(new Order(7, "bolts"));
 
@@ -43,7 +46,7 @@ public sealed class SerializerTests
     [Fact]
     public void A_payload_that_deserializes_to_null_is_an_error_not_a_null_handler_argument()
     {
-        var serializer = new JsonMessageSerializer();
+        var serializer = new JsonPayloadSerializer();
 
         var exception = Assert.Throws<InvalidOperationException>(
             () => serializer.Deserialize<Order>("null"u8.ToArray()));

@@ -4,6 +4,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Xunit;
 
+using Junction.Queue;
+
 namespace Junction.Tests.Queue;
 
 /// <summary>
@@ -21,7 +23,7 @@ public sealed class NotificationListenerTests(PostgresFixture fixture)
             new ServiceCollection().BuildServiceProvider(),
             options,
             new QueueListenerConnection(_ => connectionString),
-            NullLogger<PostgresListenerWakeup>.Instance);
+            NullLoggerFactory.Instance);
     }
 
     [Fact]

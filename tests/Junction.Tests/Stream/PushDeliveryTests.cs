@@ -5,6 +5,8 @@ using Microsoft.Extensions.Hosting;
 using Npgsql;
 using Xunit;
 
+using Junction.Stream;
+
 namespace Junction.Tests.Stream;
 
 /// <summary>

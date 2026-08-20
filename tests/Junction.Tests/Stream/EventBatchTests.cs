@@ -1,5 +1,7 @@
 using Xunit;
 
+using Junction.Stream;
+
 namespace Junction.Tests.Stream;
 
 /// <summary>Pure unit tests for <see cref="EventBatch"/> (no database).</summary>

@@ -1,11 +1,12 @@
 using BulkForge.PostgreSql;
+using Junction;
+using Junction.Internal;
 using Junction.Stream.Internal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Npgsql;
 
 namespace Junction.Stream;
 
@@ -28,16 +29,7 @@ public static class ServiceCollectionExtensions
         configure?.Invoke(options);
         services.AddSingleton(options);
 
-        // Enable Npgsql server-side auto-prepare (unless the caller already configured it): the
-        // hot statements (offset reservation, poll, cursor upsert) are repeated, so preparing them
-        // skips repeated parse/plan. Purely a connection-string tuning, no behavioural change.
-        var csb = new NpgsqlConnectionStringBuilder(connectionString);
-        if (csb.MaxAutoPrepare <= 0)
-        {
-            csb.MaxAutoPrepare = 32;
-            csb.AutoPrepareMinUsages = 2;
-        }
-        var effectiveConnectionString = csb.ConnectionString;
+        var effectiveConnectionString = NpgsqlConnectionStrings.EnableAutoPrepare(connectionString);
 
         services.AddPooledDbContextFactory<JunctionDbContext>(db =>
         {
@@ -48,7 +40,7 @@ public static class ServiceCollectionExtensions
                 db.EnableSensitiveDataLogging();
         });
 
-        services.TryAddSingleton<IEventSerializer>(new JsonEventSerializer());
+        services.TryAddSingleton<IPayloadSerializer>(new JsonPayloadSerializer());
 
         // Push delivery. Always registered, inert when disabled, and its LISTEN connection is only
         // opened once a consumer in this process actually waits for events.

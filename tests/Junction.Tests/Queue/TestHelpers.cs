@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
+using Junction.Queue;
+
 namespace Junction.Tests.Queue;
 
 internal static class TestHelpers

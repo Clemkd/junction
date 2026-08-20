@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
+using Junction.Queue;
+
 namespace Junction.Tests.Queue;
 
 /// <summary>The manual <see cref="IQueueConsumer.RunAsync"/> loop — drains, scripts and tests.</summary>
