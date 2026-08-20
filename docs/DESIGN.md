@@ -34,10 +34,9 @@ happens **above** them:
   is the auto-prepare tuning both modules' standalone (`AddQueue(connectionString)` /
   `AddStream(connectionString)`) registrations apply.
 - **One payload serializer abstraction.** `Junction.IPayloadSerializer` / `JsonPayloadSerializer`
-  back both modules' typed handlers (`IQueueMessageHandler<T>`, `ISingleMessageConsumer<T>`, …) — each
-  module still resolves its own instance from the container, so you can register a different
-  serializer for Queue than for Stream if you need to, but the default (JSON) and the contract are one
-  type, not two identical ones.
+  back both modules' typed handlers (`IQueueMessageHandler<T>`, `ISingleMessageConsumer<T>`, …), one
+  DI registration shared by both — see "Overriding the default serialization" below for exactly what
+  that does and doesn't let you customize.
 
 ## What stayed separate, and why
 
@@ -123,6 +122,109 @@ they JSON-serialize `value` and default the queue/stream name (and the message/e
 `EventData` built by hand. The lower-level `EnqueueAsync(string queue, QueueMessageData, ...)` /
 `AppendAsync(string stream, EventData, ...)` overloads are still there for anything that doesn't fit
 the "one queue per type" default — non-JSON payloads, per-message priority/delay/dedup key, etc.
+
+## Overriding the default serialization
+
+Typed handlers (`IQueueMessageHandler<T>`, `QueueHandler<T>`, `ISingleMessageConsumer<T>`,
+`StreamConsumer<T>`) turn a message/event's payload back into `T` through `Junction.IPayloadSerializer`
+— one instance, resolved as a singleton and shared by both modules. Register your own implementation
+before `AddQueue`, `AddStream`, or `AddJunction`:
+
+```csharp
+services.AddSingleton<IPayloadSerializer, MessagePackPayloadSerializer>();
+services.AddJunction<AppDbContext>(connectionString);
+```
+
+Both modules register the default (`JsonPayloadSerializer`) with `TryAddSingleton`, so an
+already-registered `IPayloadSerializer` wins — order matters: register yours *before* `AddJunction` /
+`AddQueue` / `AddStream`, not after.
+
+Two things to know before relying on this:
+
+**It's one registration, shared by both modules.** `AddQueue` and `AddStream` both resolve the exact
+same `IPayloadSerializer` — there is no way to hand Queue one serializer and Stream another through
+this mechanism, since it's a single DI slot for a single interface. If different wire formats per
+module are a real requirement, implement one `IPayloadSerializer` that branches internally (on
+`typeof(T)`, on a marker interface, …) rather than trying to register two.
+
+**The producer-side JSON factories don't go through it.** `QueueMessageData.FromJson`/`EventData.FromJson`
+— and therefore the `EnqueueAsync<T>`/`AppendAsync<T>` convenience overloads built on them — call
+`System.Text.Json` directly; they never consult `IPayloadSerializer`. That's harmless if your custom
+serializer is still JSON underneath (e.g. you only needed different `JsonSerializerOptions` — pass
+those to `JsonPayloadSerializer`'s constructor instead of writing a new implementation) or if you don't
+use the typed handler path at all. But if you switch to a genuinely different wire format (MessagePack,
+protobuf, …), the two ends will disagree unless you also stop using the JSON producer helpers and build
+the payload yourself:
+
+```csharp
+byte[] payload = MyCodec.Serialize(order);
+await junction.Queue.Producer.EnqueueAsync("Order", QueueMessageData.FromBytes("Order", payload));
+// EventData.FromBytes(...) + IEventProducer.AppendAsync(...) is the equivalent on the Stream side.
+```
+
+`QueueMessageData.FromBytes`/`EventData.FromBytes` accept a pre-encoded payload, so once you produce
+through them and your `IPayloadSerializer` decodes with the matching codec, the typed handlers work
+exactly as before — only the bytes on the wire change.
+
+## Multiple queues or streams for one type
+
+The type-derived defaults (`typeof(T).Name`) assume one queue/stream per business type — the common
+case. When you need more than one for the same type — a priority lane, a per-tenant partition, a
+second stream feeding a different set of subscribers — override the name explicitly on whichever side
+you call it from; nothing about the defaults is required once you do.
+
+**Queue.** `EnqueueAsync<T>`'s `queue` parameter and `QueueHandler<T>.Queue` both take a plain string;
+use the same one on both ends of a given lane:
+
+```csharp
+// Same type, two independent queues.
+await junction.Queue.Producer.EnqueueAsync(new Order { Id = 42 });                      // → queue "Order"
+await junction.Queue.Producer.EnqueueAsync(new Order { Id = 43 }, queue: "Order.Priority");
+
+public sealed class OrderHandler : QueueHandler<Order>
+{
+    // Queue defaults to "Order" — not overridden.
+    public override Task HandleAsync(Order order, CancellationToken ct) { /* ... */ return Task.CompletedTask; }
+}
+
+public sealed class PriorityOrderHandler : QueueHandler<Order>
+{
+    public override string Queue => "Order.Priority";
+    public override Task HandleAsync(Order order, CancellationToken ct) { /* ... */ return Task.CompletedTask; }
+}
+
+builder.Services.AddJunctionQueueWorker<OrderHandler>();
+builder.Services.AddJunctionQueueWorker<PriorityOrderHandler>();
+```
+
+Each queue is claimed independently — `PriorityOrderHandler` never competes with `OrderHandler` for
+the same message, because as far as the claim mechanics are concerned these are two unrelated queues
+that happen to carry the same payload shape.
+
+**Stream.** Same idea with `AppendAsync<T>`'s `stream` parameter and `StreamConsumer<T>.Stream`. This
+is a different axis from `ConsumerName`, and it's worth keeping the two straight:
+
+- `Stream` picks *which log* a consumer reads. Give two consumer classes different `Stream` values and
+  they read entirely independent event logs (independent retention, independent producers, …) — this
+  is the "multiple streams for one type" case.
+- `ConsumerName` picks *which cursor* a consumer reads that log with — the normal fan-out mechanism.
+  Two consumer classes with the *same* `Stream` but different `ConsumerName` both read the one log,
+  each at their own pace; that's not a "multiple streams" scenario at all, just ordinary fan-out (see
+  the naming-conventions section above), and it's what you get by default from two different consumer
+  classes without overriding anything.
+
+```csharp
+// Same event type, appended to two independent streams (e.g. different retention/ops needs).
+await junction.Stream.Producer.AppendAsync(new OrderPlaced { OrderId = 42 });                 // → stream "OrderPlaced"
+await junction.Stream.Producer.AppendAsync(new OrderPlaced { OrderId = 42 }, stream: "OrderPlaced.Audit");
+
+public sealed class BillingConsumer : StreamConsumer<OrderPlaced> { /* Stream = "OrderPlaced" (default) */ }
+
+public sealed class AuditConsumer : StreamConsumer<OrderPlaced>
+{
+    public override string Stream => "OrderPlaced.Audit";
+}
+```
 
 ## Configuration
 
