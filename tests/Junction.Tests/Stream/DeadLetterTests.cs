@@ -98,12 +98,12 @@ public sealed class DeadLetterTests(PostgresFixture fixture)
 
         await using (var producerSp = fixture.BuildProvider())
         {
-            var client = producerSp.GetRequiredService<IStreamClient>();
-            await client.Producer.AppendAsync(
+            var producerClient = producerSp.GetRequiredService<IStreamClient>();
+            await producerClient.Producer.AppendAsync(
                 cfg.Stream, EventData.FromBytes("OrderMsg", Encoding.UTF8.GetBytes("not valid json")));
-            await client.Producer.AppendAsync(
+            await producerClient.Producer.AppendAsync(
                 cfg.Stream, EventData.FromBytes("OrderMsg", JsonSerializer.SerializeToUtf8Bytes(new OrderMsg(1))));
-            await client.Producer.AppendAsync(
+            await producerClient.Producer.AppendAsync(
                 cfg.Stream, EventData.FromBytes("OrderMsg", JsonSerializer.SerializeToUtf8Bytes(new OrderMsg(2))));
         }
 
@@ -133,9 +133,9 @@ public sealed class DeadLetterTests(PostgresFixture fixture)
 
         await using (var producerSp = fixture.BuildProvider())
         {
-            var client = producerSp.GetRequiredService<IStreamClient>();
+            var producerClient = producerSp.GetRequiredService<IStreamClient>();
             var events = Enumerable.Range(0, 5).Select(i => EventData.FromText("T", $"e{i}")).ToList();
-            await client.Producer.AppendAsync(cfg.Stream, events);
+            await producerClient.Producer.AppendAsync(cfg.Stream, events);
         }
 
         var (sp, hosted, client) = await StartAsync(new AlwaysFailsAtConsumer(cfg, sink, poisonOffset: 2));
