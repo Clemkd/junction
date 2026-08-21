@@ -60,6 +60,64 @@ Both ends of the range are tested, not assumed — CI runs the full suite agains
 locally `JUNCTION_TEST_POSTGRES_IMAGE=postgres:13-alpine dotnet test tests/Junction.Tests` does the
 same.
 
+## Storage tuning and autovacuum
+
+A queue table is the most update- and delete-heavy table in a system: every message is inserted,
+updated once per attempt, then removed. Dead tuples are produced at exactly the throughput rate, and
+with stock autovacuum settings (vacuum at 20% of the table) they accumulate faster than they are
+reclaimed — claim latency then climbs with the bloat. That is the classic "our Postgres queue got
+slow" failure, and `QueueOptions.ApplyStorageTuning` (on by default) is what avoids it.
+
+The settings vacuum considerably more often than the defaults, but they stay **throttled**:
+
+| Setting | Value | Stock | Why |
+|---|---|---|---|
+| `autovacuum_vacuum_scale_factor` | `0.05` | `0.2` | Vacuum at 5% dead tuples: four times more often |
+| `autovacuum_vacuum_threshold` | `1000` | `50` | The threshold, not the scale factor, governs a small table |
+| `autovacuum_vacuum_cost_delay` | `2` | `2` | Keeps the brake on — see below |
+| `autovacuum_vacuum_cost_limit` | `2000` | `200` | Ten times the budget per cycle, so vacuum keeps up |
+| `autovacuum_analyze_scale_factor` | `0.05` | `0.1` | A queue's row count swings; the claim's plan depends on the estimate |
+| `fillfactor` | `85` | `100` | An updated row's new version stays on its page |
+
+An earlier version removed the throttle outright (`autovacuum_vacuum_cost_delay = 0`) on the grounds
+that this is a small table by design. That is true right up to the moment it is not: a backlog spike is
+precisely when vacuum matters most and precisely when an unthrottled one competes with the claim path
+for I/O. Raising the budget rather than removing the brake reclaims pages just as fast without that
+failure mode.
+
+### What `fillfactor` does not buy here
+
+The reserve is worth having, but not for the reason it is usually chosen. **No update Junction performs
+on `messages` can be a HOT update**, because PostgreSQL disallows HOT whenever a column used by an
+index is modified, and every column these updates touch is:
+
+- the claim sets `state`, which appears in the predicate of *both* partial indexes;
+- the heartbeat sets `lease_expires_at`, which is the key of `ix_messages_lease`.
+
+Measured on PostgreSQL 18, 100 rows per statement:
+
+| Update | Rows | HOT |
+|---|---|---|
+| Claim (`state` 0 → 1) | 100 | **0** |
+| Heartbeat (`lease_expires_at`) | 100 | **0** |
+| Control (`last_error`, unindexed) | 100 | 51 |
+
+What the reserve still buys is locality: the new version does not extend the relation, and vacuum
+reclaims the old one from the same page. If index churn from heartbeats ever shows up in a profile, the
+lever is the *index*, not the fillfactor — dropping `lease_expires_at` from `ix_messages_lease`'s key
+would make the heartbeat HOT-eligible, at the cost of the recovery sweep's ordered scan.
+
+### Tables the tuning does not cover
+
+Only `messages` is tuned. `completed` and `dead_letters` are insert-then-bulk-delete tables: retention
+pruning removes a whole window at once, leaving a large batch of dead tuples for stock autovacuum to
+find. If you keep long retentions on a busy queue, consider the same treatment for them. Large payloads
+also land in the table's TOAST relation, which has its own autovacuum settings
+(`ALTER TABLE … SET (toast.autovacuum_vacuum_scale_factor = …)`).
+
+`ModelBuilder.AddJunctionModel()` does not carry any of this — EF has no model concept for storage
+parameters. Add `QueueSchema.TuningScript(...)` to your migration by hand with `migrationBuilder.Sql(...)`.
+
 ## Push delivery (LISTEN/NOTIFY)
 
 Both modules support push delivery: idle workers/consumers wait on a PostgreSQL `NOTIFY` instead of

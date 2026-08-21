@@ -324,8 +324,15 @@ public sealed class MetricsTests(PostgresFixture fixture)
         // Something is claimable, so the queue has an age to report.
         Assert.True(harness.Recorder.Last(OldestReady, For(queue)) >= 0);
 
-        Assert.True(harness.Recorder.Last(StorageBytes, (QueueDiagnostics.PartTag, "table")) > 0);
-        Assert.True(harness.Recorder.Last(StorageBytes, (QueueDiagnostics.PartTag, "index")) > 0);
+        // Reported, and a size rather than a negative number. Deliberately not "> 0": the storage
+        // gauges measure the whole shared messages table, which every test in this collection writes
+        // to and empties, and pg_table_size of an empty table autovacuum has just truncated is
+        // legitimately 0. Asserting non-empty made this test fail about one run in three. What the
+        // test is actually for is that the collector fills the gauges, which is what is checked here.
+        Assert.True(harness.Recorder.Last(StorageBytes, (QueueDiagnostics.PartTag, "table")) >= 0);
+        Assert.True(harness.Recorder.Last(StorageBytes, (QueueDiagnostics.PartTag, "index")) >= 0);
+        Assert.NotNull(harness.Recorder.Last(StorageBytes, (QueueDiagnostics.PartTag, "table")));
+        Assert.NotNull(harness.Recorder.Last(StorageBytes, (QueueDiagnostics.PartTag, "index")));
         Assert.NotNull(harness.Recorder.Last(DeadTuples));
     }
 
