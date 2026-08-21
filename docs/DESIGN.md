@@ -28,6 +28,38 @@ Both modules share:
 - **Push delivery** via a shared LISTEN/NOTIFY engine — see below.
 - **One payload serializer abstraction** — see "Overriding the default serialization" below.
 
+## PostgreSQL versions
+
+**Supported: 13 and later, vanilla, no extensions.**
+
+The floor is set by one function. `gen_random_uuid()` — which mints the lease token that fences every
+completion — became a core function in PostgreSQL 13; before that it needed `pgcrypto`. Everything
+else Junction runs predates that by years: `FOR UPDATE SKIP LOCKED` (9.5), identity columns (10),
+`unnest` over several arrays (9.4), aggregate `FILTER` (9.4), partial indexes, `ON CONFLICT` (9.5),
+`jsonb` (9.4). Nothing uses `MERGE`, `NULLS NOT DISTINCT`, or any other newer syntax.
+
+From **18** the lease token is `uuidv7()` instead. It is time-ordered, so an in-flight row tells you
+when it was claimed without joining anything — useful precisely when you are looking at a message
+that is stuck. Nothing else changes: the token is never indexed and only ever compared for equality,
+so this buys diagnosability, not throughput.
+
+The choice is made from the server, once per process, on the first operation that needs it
+(`QueueCatalog.DetectServerAsync`, reading `current_setting('server_version_num')`). Two properties
+matter:
+
+- **The portable statements are the default.** A catalog that has not yet asked the server hands out
+  `gen_random_uuid()`, so there is no window in which a claim carrying `uuidv7()` could reach a
+  server that does not have it.
+- **A server below the floor is refused up front**, with its `server_version_num` in the message,
+  rather than failing later on a missing function.
+
+Detection runs even when `AutoCreateSchema` is off: the schema may be yours to create, but the
+dialect still has to match the server.
+
+Both ends of the range are tested, not assumed — CI runs the full suite against 13 and 18, and
+locally `JUNCTION_TEST_POSTGRES_IMAGE=postgres:13-alpine dotnet test tests/Junction.Tests` does the
+same.
+
 ## Push delivery (LISTEN/NOTIFY)
 
 Both modules support push delivery: idle workers/consumers wait on a PostgreSQL `NOTIFY` instead of

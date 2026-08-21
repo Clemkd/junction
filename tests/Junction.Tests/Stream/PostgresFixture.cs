@@ -14,7 +14,18 @@ namespace Junction.Tests.Stream;
 /// </summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:18-alpine")
+    /// <summary>
+    /// PostgreSQL image under test. Defaults to the newest supported release; set
+    /// <c>JUNCTION_TEST_POSTGRES_IMAGE</c> to run the same suite against the oldest one
+    /// (<c>postgres:13-alpine</c>) — that is how the claimed PostgreSQL 13+ floor is verified rather
+    /// than assumed, and how the uuidv7 branch is exercised on both sides of its version gate.
+    /// </summary>
+    private static string Image =>
+        Environment.GetEnvironmentVariable("JUNCTION_TEST_POSTGRES_IMAGE") is { Length: > 0 } image
+            ? image
+            : "postgres:18-alpine";
+
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder(Image)
         .Build();
 
     public string ConnectionString { get; private set; } = string.Empty;

@@ -18,9 +18,28 @@ internal sealed class QueueCatalog(QueueOptions options, QueueMetrics? metrics =
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private volatile bool _initialized;
 
+    /// <summary>
+    /// Statements valid on every supported server, and the same statements using the <c>uuidv7()</c>
+    /// lease tokens only PostgreSQL 18 has. Both are built up front and <see cref="Sql"/> starts on
+    /// the portable one, so there is no window in which a caller could be handed SQL the server
+    /// cannot parse — the upgrade happens once the server's version is actually known.
+    /// </summary>
+    private readonly QueueSql _portableSql = new(options.Schema);
+    private readonly QueueSql _uuidV7Sql = new(options.Schema, useUuidV7: true);
+
+    /// <summary><c>server_version_num</c>, or 0 until the server has been asked.</summary>
+    private volatile int _serverVersion;
+
     public QueueOptions Options { get; } = options;
 
-    public QueueSql Sql { get; } = new(options.Schema);
+    /// <summary>
+    /// The statements to run. Portable until <see cref="DetectServerAsync"/> has established that the
+    /// server is new enough for the <c>uuidv7()</c> variant.
+    /// </summary>
+    public QueueSql Sql => _serverVersion >= QueueSql.UuidV7ServerVersion ? _uuidV7Sql : _portableSql;
+
+    /// <summary><c>server_version_num</c> of the server behind this catalog, or 0 if not yet known.</summary>
+    public int ServerVersion => _serverVersion;
 
     /// <summary>
     /// The instruments every client on this catalog records to. Defaults to the process-wide meter;
@@ -28,9 +47,49 @@ internal sealed class QueueCatalog(QueueOptions options, QueueMetrics? metrics =
     /// </summary>
     public QueueMetrics Metrics { get; } = metrics ?? QueueMetrics.Instance;
 
+    /// <summary>
+    /// Ask the server for its version, once per catalog, and switch <see cref="Sql"/> to the
+    /// <c>uuidv7()</c> statements when it is new enough. Also the one place that rejects a server too
+    /// old to run this SQL at all — failing on the first operation with a version number beats failing
+    /// later with "function gen_random_uuid() does not exist".
+    /// <para>
+    /// Separate from <see cref="InitializeAsync"/> because it has to run even when
+    /// <see cref="QueueOptions.AutoCreateSchema"/> is off: the schema may be someone else's to create,
+    /// but the dialect still has to match the server.
+    /// </para>
+    /// </summary>
+    public async ValueTask DetectServerAsync(IJunctionConnectionSource source, CancellationToken ct)
+    {
+        if (_serverVersion != 0)
+            return;
+
+        await _initGate.WaitAsync(ct);
+        try
+        {
+            if (_serverVersion != 0)
+                return;
+
+            await using var connection = await source.AcquireAsync(ct);
+            int version = await QueueCommands.ServerVersionAsync(connection, ct);
+            if (version < QueueSql.MinimumServerVersion)
+                throw new NotSupportedException(
+                    $"Junction requires PostgreSQL {QueueSql.MinimumServerVersion / 10000} or later; " +
+                    $"this server reports server_version_num {version}.");
+
+            _serverVersion = version;
+        }
+        finally
+        {
+            _initGate.Release();
+        }
+    }
+
     /// <summary>Create the schema on first use. Concurrent callers (many hosted workers) fold into one.</summary>
     public async Task InitializeAsync(IJunctionConnectionSource source, CancellationToken ct)
     {
+        // Before the early return: the dialect has to be settled whether or not we own the schema.
+        await DetectServerAsync(source, ct);
+
         if (_initialized || !Options.AutoCreateSchema)
             return;
 
@@ -66,11 +125,17 @@ internal sealed class QueueCatalog(QueueOptions options, QueueMetrics? metrics =
     {
         _ids.Clear();
         _initialized = false;
+        // The version too: Reinitialize is also how a process is pointed at a different database.
+        _serverVersion = 0;
     }
 
     /// <summary>Resolve a queue's id, creating the queue if it does not exist yet.</summary>
     public async ValueTask<int> ResolveAsync(IJunctionConnectionSource source, string queue, CancellationToken ct)
     {
+        // The claim path reaches Sql through here, so this is where the dialect has to be settled for
+        // a process that never calls InitializeAsync (AutoCreateSchema off, or a producer-only host).
+        await DetectServerAsync(source, ct);
+
         if (_ids.TryGetValue(queue, out int cached))
             return cached;
 
@@ -83,6 +148,8 @@ internal sealed class QueueCatalog(QueueOptions options, QueueMetrics? metrics =
     /// <summary>Resolve a queue's id without creating it.</summary>
     public async ValueTask<int> RequireAsync(IJunctionConnectionSource source, string queue, CancellationToken ct)
     {
+        await DetectServerAsync(source, ct);
+
         if (_ids.TryGetValue(queue, out int cached))
             return cached;
 

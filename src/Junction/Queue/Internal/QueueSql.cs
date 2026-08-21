@@ -26,10 +26,36 @@ namespace Junction.Queue.Internal;
 /// </summary>
 internal sealed class QueueSql
 {
-    public QueueSql(string schema)
+    /// <summary>
+    /// Lowest PostgreSQL release this SQL runs on, expressed as <c>server_version_num</c>. The floor
+    /// is set by <c>gen_random_uuid()</c>, which became a core function in 13 (before that it needed
+    /// the pgcrypto extension); everything else here — <c>FOR UPDATE SKIP LOCKED</c>, identity
+    /// columns, <c>unnest</c> over several arrays, aggregate <c>FILTER</c>, partial indexes,
+    /// <c>ON CONFLICT</c> — has been available for longer.
+    /// </summary>
+    public const int MinimumServerVersion = 130000;
+
+    /// <summary>
+    /// Release that introduced <c>uuidv7()</c>. Time-ordered lease tokens carry their claim instant,
+    /// which makes an in-flight row self-describing when diagnosing a stuck message.
+    /// </summary>
+    public const int UuidV7ServerVersion = 180000;
+
+    /// <param name="useUuidV7">
+    /// Emit <c>uuidv7()</c> rather than <c>gen_random_uuid()</c> for lease tokens. Off by default so
+    /// the statements this object carries are always valid on the oldest supported server: a catalog
+    /// that has not yet learned the server's version hands out the portable variant rather than one
+    /// that would fail to parse.
+    /// </param>
+    public QueueSql(string schema, bool useUuidV7 = false)
     {
         Schema = schema;
         WakeChannel = $"{schema}_wake";
+        UsesUuidV7 = useUuidV7;
+
+        // The only version-dependent fragment in this class. Both variants are plain generators of a
+        // fresh uuid per updated row; nothing else in the claim changes with them.
+        string newLeaseToken = useUuidV7 ? "uuidv7()" : "gen_random_uuid()";
 
         // DO UPDATE rather than DO NOTHING: the no-op update makes the statement return the existing
         // id in every case, including the race where a concurrent transaction has inserted the same
@@ -103,7 +129,7 @@ internal sealed class QueueSql
              UPDATE {schema}.messages AS m
              SET state = 1,
                  attempts = m.attempts + 1,
-                 lease_token = gen_random_uuid(),
+                 lease_token = {newLeaseToken},
                  lease_expires_at = now() + make_interval(secs => @lease),
                  worker_id = @worker_id
              FROM (
@@ -158,7 +184,7 @@ internal sealed class QueueSql
              UPDATE {schema}.messages AS m
              SET state = 1,
                  attempts = m.attempts + 1,
-                 lease_token = gen_random_uuid(),
+                 lease_token = {newLeaseToken},
                  lease_expires_at = now() + make_interval(secs => @lease),
                  worker_id = @worker_id
              WHERE m.id = ANY (ARRAY(SELECT id FROM starving UNION ALL SELECT id FROM ranked))
@@ -517,6 +543,9 @@ internal sealed class QueueSql
     }
 
     public string Schema { get; }
+
+    /// <summary>Whether lease tokens in these statements come from <c>uuidv7()</c>.</summary>
+    public bool UsesUuidV7 { get; }
 
     /// <summary>NOTIFY channel carrying "a message landed in this queue" wake-ups.</summary>
     public string WakeChannel { get; }

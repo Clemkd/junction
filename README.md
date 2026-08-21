@@ -31,6 +31,15 @@ infrastructure, that's the trade Junction makes.
   At-least-once delivery, crash recovery, push delivery via `LISTEN`/`NOTIFY`, dead letters for hosted
   consumers.
 
+## Requirements
+
+- **PostgreSQL 13 or later**, vanilla — no extensions. 13 is the floor because that is the release
+  that made `gen_random_uuid()` a core function; everything else Junction runs has been available for
+  longer. On **18 or later** lease tokens are `uuidv7()` instead, so an in-flight row carries the
+  instant it was claimed. The dialect is picked from the server on first use, never from a build
+  flag. CI runs the whole suite against both 13 and 18.
+- **.NET 10**.
+
 ## Install
 
 ```bash
