@@ -202,7 +202,6 @@ services.AddJunction<AppDbContext>(connectionString, o =>
 ## Not included
 
 - Samples (`samples/`) and .NET Aspire orchestration (`aspire/`).
-- Benchmarks (`benchmarks/`).
 - Queue's bulk-enqueue path uses raw binary `COPY` with no extra dependency; Stream's bulk-append path
   uses BulkForge. The two are independent by design.
 
@@ -210,5 +209,6 @@ services.AddJunction<AppDbContext>(connectionString, o =>
 
 ```bash
 dotnet build
-dotnet test tests/Junction.Tests   # needs Docker (Testcontainers.PostgreSql)
+dotnet test tests/Junction.Tests                        # needs Docker (Testcontainers.PostgreSql)
+dotnet run -c Release --project benchmarks/Junction.Benchmarks   # see docs/BENCHMARK.md
 ```

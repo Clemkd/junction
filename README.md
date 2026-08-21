@@ -81,6 +81,13 @@ builder.Services.AddJunctionStreamConsumer<BillingConsumer>();
 Only need one of the two? `Junction.Queue`'s `AddQueue`/`AddQueueWorker` and `Junction.Stream`'s
 `AddStream`/`AddStreamConsumer` work standalone, with the same types.
 
+## Performance
+
+Both modules ship a [BenchmarkDotNet](https://benchmarkdotnet.org) suite
+(`benchmarks/Junction.Benchmarks`) covering enqueue/claim throughput, worker contention, event append
+(EF vs. bulk `COPY`), group commit and push-delivery latency. See
+[`docs/BENCHMARK.md`](docs/BENCHMARK.md) for how to run it and reference numbers.
+
 ## Documentation
 
 See [`docs/DESIGN.md`](docs/DESIGN.md) for architecture, configuration, serialization overrides, and

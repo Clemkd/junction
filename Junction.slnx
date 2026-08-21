@@ -1,9 +1,11 @@
 <Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Junction.Benchmarks/Junction.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Junction/Junction.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Junction.Tests/Junction.Tests.csproj" />
   </Folder>
-
 </Solution>
