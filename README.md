@@ -29,7 +29,7 @@ infrastructure, that's the trade Junction makes.
   priorities, delays.
 - **Stream** — fan-out. Every consumer sees every event, each with its own durable, replayable cursor.
   At-least-once delivery, crash recovery, push delivery via `LISTEN`/`NOTIFY`, dead letters for hosted
-  consumers.
+  consumers, and a cursor that commits inside your own transaction.
 
 ## Requirements
 
@@ -88,7 +88,7 @@ public sealed class BillingConsumer : StreamConsumer<OrderPlaced>
     public override Task ConsumeAsync(OrderPlaced e, CancellationToken ct)
     {
         // ... react to the event ...
-        return Task.CompletedTask; // commits the cursor; throwing redelivers this event
+        return Task.CompletedTask; // commits the cursor; throwing rolls back and redelivers
     }
 }
 

@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Junction.Connectors;
 using Junction.Internal;
 using Junction.Stream.Internal;
 using Junction.Stream.Model;
@@ -197,6 +198,69 @@ internal sealed class EventConsumer : IEventConsumer
         }
     }
 
+    /// <summary>
+    /// Write the cursor on a connection the caller owns, so it commits with the caller's transaction
+    /// rather than on its own. This is the whole of the transactional-commit feature: a consumer's
+    /// business writes and the advance past the event that produced them become one commit, which
+    /// turns at-least-once handling into effectively-once.
+    /// <para>
+    /// Deliberately does <b>not</b> advance the in-memory position: this write is only real once the
+    /// caller commits, and a rollback that had already moved the field would make the consumer skip
+    /// events for good. The caller calls <see cref="MarkCommitted"/> after its commit succeeds.
+    /// </para>
+    /// </summary>
+    internal async Task CommitOnAsync(
+        IJunctionConnectionSource source, long offset, CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            await using var connection = await source.AcquireAsync(ct);
+            await using var ctx = BorrowedContext.Create(connection.Connection, connection.Transaction);
+            await EnsureLoadedAsync(ctx, ct);
+            await UpsertCursorAsync(ctx, offset + 1, ct);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Record dead letters on a connection the caller owns. Paired with
+    /// <see cref="CommitOnAsync"/> in one transaction, this closes the gap the two-statement version
+    /// leaves: an event can no longer be buried without also being skipped, so a crash between the two
+    /// cannot produce a second dead letter for the same event on restart.
+    /// </summary>
+    internal async Task DeadLetterOnAsync(
+        IJunctionConnectionSource source, IReadOnlyList<EventRecord> records, int attempts, string? error,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        if (records.Count == 0)
+            return;
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            await using var connection = await source.AcquireAsync(ct);
+            await using var ctx = BorrowedContext.Create(connection.Connection, connection.Transaction);
+            await EnsureLoadedAsync(ctx, ct);
+            ctx.DeadLetters.AddRange(BuildDeadLetters(records, attempts, error));
+            await ctx.SaveChangesAsync(ct);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Accept a position the caller has just committed. Separate from the write so the in-memory
+    /// position only ever moves after the database has agreed — see <see cref="CommitOnAsync"/>.
+    /// </summary>
+    internal void MarkCommitted(long offset) => Interlocked.Exchange(ref _position, offset + 1);
+
     public async Task DeadLetterAsync(
         IReadOnlyList<EventRecord> records, int attempts, string? error, CancellationToken ct = default)
     {
@@ -209,32 +273,37 @@ internal sealed class EventConsumer : IEventConsumer
         {
             await using var ctx = await _factory.CreateDbContextAsync(ct);
             await EnsureLoadedAsync(ctx, ct);
-
-            var now = DateTime.UtcNow;
-            var entities = new List<StreamDeadLetterEntity>(records.Count);
-            foreach (var r in records)
-            {
-                entities.Add(new StreamDeadLetterEntity
-                {
-                    StreamId = _streamId,
-                    ConsumerName = Name,
-                    Sequence = r.Offset,
-                    EventKey = r.Key,
-                    EventType = r.Type,
-                    Payload = r.Payload.ToArray(),
-                    Headers = HeaderSerializer.Serialize(r.Headers),
-                    Attempts = attempts,
-                    FailedAt = now,
-                    Error = Truncate(error),
-                });
-            }
-            ctx.DeadLetters.AddRange(entities);
+            ctx.DeadLetters.AddRange(BuildDeadLetters(records, attempts, error));
             await ctx.SaveChangesAsync(ct);
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    private List<StreamDeadLetterEntity> BuildDeadLetters(
+        IReadOnlyList<EventRecord> records, int attempts, string? error)
+    {
+        var now = DateTime.UtcNow;
+        var entities = new List<StreamDeadLetterEntity>(records.Count);
+        foreach (var r in records)
+        {
+            entities.Add(new StreamDeadLetterEntity
+            {
+                StreamId = _streamId,
+                ConsumerName = Name,
+                Sequence = r.Offset,
+                EventKey = r.Key,
+                EventType = r.Type,
+                Payload = r.Payload.ToArray(),
+                Headers = HeaderSerializer.Serialize(r.Headers),
+                Attempts = attempts,
+                FailedAt = now,
+                Error = Truncate(error),
+            });
+        }
+        return entities;
     }
 
     /// <summary>Keep a stack trace from becoming the biggest column in the dead-letter table.</summary>

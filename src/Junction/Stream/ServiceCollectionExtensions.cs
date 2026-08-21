@@ -118,7 +118,16 @@ public static class ServiceCollectionExtensions
             services.AddSingleton<IEventProducer, EventProducer>();
         }
 
-        services.TryAddScoped<IStreamClient, StreamClient>();
+        // Built by hand rather than by constructor injection so the connector stays optional:
+        // GetService, not GetRequiredService, because AddStream(connectionString) registers none and
+        // the client then keeps its cursor writes on the module's own pool.
+        services.TryAddScoped<IStreamClient>(sp => new StreamClient(
+            sp.GetRequiredService<IDbContextFactory<JunctionDbContext>>(),
+            sp.GetRequiredService<IEventProducer>(),
+            sp.GetRequiredService<StreamNotificationListener>(),
+            sp.GetRequiredService<StreamOptions>(),
+            sp.GetRequiredService<StreamInitGate>(),
+            sp.GetService<StreamConnectionSource>()));
 
         return services;
     }

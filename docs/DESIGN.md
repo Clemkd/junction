@@ -74,6 +74,38 @@ exactly the same way regardless of whether a `NOTIFY` or the poll interval is wh
 Enable it with `QueueOptions.EnableNotifications` / `StreamOptions.EnablePushDelivery` (the latter is
 on by default).
 
+## Committing with your own writes
+
+Both modules can commit their own bookkeeping inside the transaction your code is already using, which
+is what turns at-least-once *delivery* into effectively-once *processing*. It needs the EF connector
+(`AddQueue<TContext>` / `AddStream<TContext>`): the connection-string registrations have no caller
+connection to join, so there the options below are inert rather than an error.
+
+| Direction | Option | What becomes atomic |
+|---|---|---|
+| Queue, producing | — (always) | An enqueue and your own writes |
+| Queue, consuming | `QueueWorkerOptions.TransactionalCompletion` (default `true`) | The handler's writes and the message's acknowledgement |
+| Stream, producing | — (always) | An append and your own writes |
+| Stream, consuming | `ConsumerHostOptions.TransactionalCommit` (default `true`) | The consumer's writes and the cursor advance past the event |
+
+The condition is the same in every row and easy to miss: **the handler has to write through the
+`DbContext` of the scope it was resolved from.** That is the context the transaction was opened on. A
+handler that opens its own context, or reaches a different database, is outside the transaction and
+back to at-least-once — which is the honest default for a side effect the database does not own.
+
+For the consuming rows this also means the retry is a real rollback: a consumer that throws after
+writing leaves neither its rows nor the cursor moved, so the event comes back and is handled again
+from a clean slate. The in-memory cursor is only advanced once the commit returns, so a rollback can
+never leave a consumer believing it passed events it never handled.
+
+Turn the consuming options **off** when the work is not in this database — sending mail, calling an
+API. A transaction cannot protect a side effect it does not own, and holding one open across a network
+call is the long-transaction pattern that hurts every table it touches.
+
+Group commit is the one case where the guarantee silently does not apply: those appends are written by
+a background flusher with no caller in the picture, so they cannot join a transaction. See
+`StreamOptions.EnableGroupCommit`.
+
 ## Typed handlers and naming conventions
 
 `IQueueMessageHandler<T>` and `ISingleMessageConsumer<T>` require you to state the queue/stream

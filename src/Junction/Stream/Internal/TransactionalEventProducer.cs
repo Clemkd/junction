@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
-using System.Data.Common;
 using BulkForge;
-using BulkForge.PostgreSql;
 using Junction.Connectors;
 using Junction.Stream.Model;
 using Microsoft.EntityFrameworkCore;
@@ -56,7 +54,7 @@ internal sealed class TransactionalEventProducer(
             throw new ArgumentException("At least one event is required.", nameof(events));
 
         await using var connection = await _source.AcquireAsync(ct);
-        await using var ctx = CreateContext(connection.Connection, connection.Transaction);
+        await using var ctx = BorrowedContext.Create(connection.Connection, connection.Transaction);
 
         // Ensure the stream row exists. Only cached when it ran outside any transaction (so it is
         // durable regardless of what happens next) — when riding the caller's ambient transaction,
@@ -113,14 +111,4 @@ internal sealed class TransactionalEventProducer(
         return new AppendResult(stream, first, seq - 1, events.Count);
     }
 
-    private static JunctionDbContext CreateContext(DbConnection connection, DbTransaction? transaction)
-    {
-        var builder = new DbContextOptionsBuilder<JunctionDbContext>();
-        builder.UseNpgsql(connection);
-        builder.UseBulkForge();
-        var ctx = new JunctionDbContext(builder.Options);
-        if (transaction is not null)
-            ctx.Database.UseTransaction(transaction);
-        return ctx;
-    }
 }

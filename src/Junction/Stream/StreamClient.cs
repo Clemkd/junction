@@ -1,5 +1,6 @@
 using System.Data;
 using System.Data.Common;
+using Junction.Connectors;
 using Junction.Stream.Internal;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,12 +11,22 @@ internal sealed class StreamClient(
     IEventProducer producer,
     StreamNotificationListener notifications,
     StreamOptions options,
-    StreamInitGate initGate) : IStreamClient
+    StreamInitGate initGate,
+    StreamConnectionSource? connectionSource = null) : IStreamClient
 {
     public IEventProducer Producer { get; } = producer;
 
     public IEventConsumer GetConsumer(string stream, string consumerName) =>
         new EventConsumer(factory, stream, consumerName, notifications);
+
+    /// <summary>
+    /// The caller's connector, or <c>null</c> under the connection-string-only registration — there is
+    /// then no caller connection to join, so cursor commits keep to the module's own pool.
+    /// </summary>
+    internal IJunctionConnectionSource? ConnectionSource => connectionSource?.Value;
+
+    public async Task<IJunctionTransaction?> BeginTransactionAsync(CancellationToken ct = default) =>
+        connectionSource is null ? null : await connectionSource.Value.BeginTransactionAsync(ct);
 
     public async Task InitializeAsync(CancellationToken ct = default)
     {

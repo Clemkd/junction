@@ -1,3 +1,4 @@
+using Junction.Connectors;
 namespace Junction.Stream;
 
 /// <summary>Top-level entry point for producing, consuming and inspecting streams.</summary>
@@ -32,6 +33,14 @@ public interface IStreamClient
 
     /// <summary>Ensure the underlying schema exists (idempotent).</summary>
     Task InitializeAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Begin a transaction on the connector, so a consumer's writes and its cursor commit land as one.
+    /// Returns <c>null</c> when a transaction is already open (yours to commit — the cursor joins it
+    /// either way), or when the module was registered with a connection string rather than a
+    /// <c>DbContext</c> and so has no caller connection to join.
+    /// </summary>
+    Task<IJunctionTransaction?> BeginTransactionAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Most recent dead letters — events a hosted consumer (<c>AddStreamConsumer</c>) could not
