@@ -8,7 +8,19 @@ namespace Junction.Stream;
 /// appends are queued and a single background flusher drains everything currently available, groups
 /// it by stream, and writes each stream's events in one transaction. Many small concurrent appends
 /// therefore collapse into few transactions (few fsyncs) and never contend on the stream row lock,
-/// since only the flusher writes. Batching is load-driven — no artificial delay is added.
+/// since only the flusher writes.
+/// <para>
+/// Batching is load-driven, plus a linger window: after the first queued event the flusher waits
+/// up to <see cref="StreamOptions.GroupCommitLinger"/> (2 ms by default) for more to accumulate,
+/// then flushes on whichever comes first — a full batch or that timeout. So a low arrival rate
+/// never waits for a full batch, but a single append does pay the window.
+/// </para>
+/// <para>
+/// Two consequences worth knowing. These appends run on the flusher's own connection, so they
+/// cannot join a caller's transaction even under <c>AddStream&lt;TContext&gt;</c>. And cancelling an
+/// <c>AppendAsync</c> after the request has been queued makes the call throw without un-appending
+/// the event: the flusher has no way to recall it once it is in a batch.
+/// </para>
 /// </summary>
 internal sealed class GroupCommitProducer : IEventProducer, IAsyncDisposable
 {
@@ -87,7 +99,30 @@ internal sealed class GroupCommitProducer : IEventProducer, IAsyncDisposable
         {
             // shutting down
         }
+        finally
+        {
+            // A request that never reached a flush has an AppendAsync awaiting its completion. Leaving
+            // it unset does not fail that call, it hangs it — the task simply never completes. Faulting
+            // them is the only honest outcome: the loop is gone and nothing will write them.
+            AbandonPending(reader, buffer);
+        }
     }
+
+    /// <summary>
+    /// Complete every request the loop is walking away from. <c>TrySetException</c> so the ones already
+    /// resolved by a successful flush are left alone.
+    /// </summary>
+    private static void AbandonPending(ChannelReader<Request> reader, List<Request> buffer)
+    {
+        foreach (var request in buffer)
+            request.Completion.TrySetException(ShutdownError());
+
+        while (reader.TryRead(out var orphan))
+            orphan.Completion.TrySetException(ShutdownError());
+    }
+
+    private static Exception ShutdownError() => new OperationCanceledException(
+        "The group-commit flusher stopped before this append was written; the event was not appended.");
 
     private async Task LingerAsync(ChannelReader<Request> reader, List<Request> buffer)
     {
