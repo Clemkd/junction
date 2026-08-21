@@ -3,13 +3,15 @@ using System.Data.Common;
 namespace Junction.Connectors;
 
 /// <summary>
-/// The <b>connector</b>: where the Queue module gets the PostgreSQL connection it runs its SQL on.
+/// The <b>connector</b>: where a module gets the PostgreSQL connection it runs its SQL on. Used by both
+/// Queue (<c>AddQueue&lt;TContext&gt;</c>) and Stream (<c>AddStream&lt;TContext&gt;</c>).
 /// <para>
-/// The Queue module never owns a connection pool of its own by default. It borrows the connection you
+/// Neither module owns a connection pool of its own by default. Each borrows the connection you
 /// already have — by default the one behind your EF Core <c>DbContext</c> — which is what makes a
-/// message completion and your business writes commit <b>together</b>: same connection, same
-/// transaction, one <c>COMMIT</c>. That turns at-least-once delivery into effectively-once processing
-/// without any distributed transaction.
+/// message completion, an append, and your business writes commit <b>together</b>: same connection,
+/// same transaction, one <c>COMMIT</c>. That turns at-least-once delivery into effectively-once
+/// processing without any distributed transaction, and removes the need for an outbox table to publish
+/// alongside your own writes.
 /// </para>
 /// <para>
 /// A <see cref="DbConnection"/> cannot run two commands at once, so a source is scoped to one unit

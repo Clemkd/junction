@@ -13,7 +13,6 @@ namespace Junction.Stream;
 /// </summary>
 internal abstract class ConsumerHostBase<TConsumer>(
     IServiceProvider services,
-    IStreamClient client,
     StreamNotificationListener notifications,
     ILogger logger,
     ConsumerHostOptions options) : BackgroundService
@@ -35,21 +34,27 @@ internal abstract class ConsumerHostBase<TConsumer>(
     {
         string stream, name;
         int pollSize;
+        IEventConsumer consumer;
+
+        // IStreamClient may be scoped (AddStream<TContext>), so it is resolved and used here rather
+        // than captured as a constructor dependency of this singleton host — the returned
+        // IEventConsumer only holds the stable, singleton-safe factory and listener, so it stays
+        // valid for the rest of this method after the scope is gone.
         using (var scope = Services.CreateScope())
         {
             var probe = scope.ServiceProvider.GetRequiredService<TConsumer>();
             stream = probe.Stream;
             name = probe.ConsumerName;
             pollSize = Math.Max(1, ResolvePollSize(probe));
-        }
 
-        await client.InitializeAsync(stoppingToken);
-        await client.EnsureStreamAsync(stream, stoppingToken);
+            var client = scope.ServiceProvider.GetRequiredService<IStreamClient>();
+            await client.InitializeAsync(stoppingToken);
+            await client.EnsureStreamAsync(stream, stoppingToken);
+            consumer = client.GetConsumer(stream, name);
+        }
 
         // This host is the active reader of that cursor; warn if someone else already is.
         notifications.ClaimCursor(stream, name);
-
-        var consumer = client.GetConsumer(stream, name);
 
         logger.LogInformation("Junction consumer '{Consumer}' on stream '{Stream}' started ({Mode}, size {Size}).",
             name, stream, Mode, pollSize);
@@ -110,9 +115,9 @@ internal abstract class ConsumerHostBase<TConsumer>(
 
 /// <summary>Drives an <see cref="ISingleMessageConsumer"/> (raw <see cref="EventRecord"/>).</summary>
 internal sealed class SingleRecordConsumerHost<TConsumer>(
-    IServiceProvider services, IStreamClient client, StreamNotificationListener notifications,
+    IServiceProvider services, StreamNotificationListener notifications,
     ILogger<SingleRecordConsumerHost<TConsumer>> logger, ConsumerHostOptions options)
-    : ConsumerHostBase<TConsumer>(services, client, notifications, logger, options)
+    : ConsumerHostBase<TConsumer>(services, notifications, logger, options)
     where TConsumer : class, ISingleMessageConsumer
 {
     protected override string Mode => "single";
@@ -125,9 +130,9 @@ internal sealed class SingleRecordConsumerHost<TConsumer>(
 
 /// <summary>Drives an <see cref="IBatchMessageConsumer"/> (raw <see cref="EventRecord"/>).</summary>
 internal sealed class BatchRecordConsumerHost<TConsumer>(
-    IServiceProvider services, IStreamClient client, StreamNotificationListener notifications,
+    IServiceProvider services, StreamNotificationListener notifications,
     ILogger<BatchRecordConsumerHost<TConsumer>> logger, ConsumerHostOptions options)
-    : ConsumerHostBase<TConsumer>(services, client, notifications, logger, options)
+    : ConsumerHostBase<TConsumer>(services, notifications, logger, options)
     where TConsumer : class, IBatchMessageConsumer
 {
     protected override string Mode => "batch";
@@ -140,10 +145,10 @@ internal sealed class BatchRecordConsumerHost<TConsumer>(
 
 /// <summary>Drives an <see cref="ISingleMessageConsumer{TMessage}"/> — deserializes each event to the entity.</summary>
 internal sealed class SingleTypedConsumerHost<TConsumer, TMessage>(
-    IServiceProvider services, IStreamClient client, StreamPayloadSerializer serializer,
+    IServiceProvider services, StreamPayloadSerializer serializer,
     StreamNotificationListener notifications,
     ILogger<SingleTypedConsumerHost<TConsumer, TMessage>> logger, ConsumerHostOptions options)
-    : ConsumerHostBase<TConsumer>(services, client, notifications, logger, options)
+    : ConsumerHostBase<TConsumer>(services, notifications, logger, options)
     where TConsumer : class, ISingleMessageConsumer<TMessage>
 {
     protected override string Mode => "single<" + typeof(TMessage).Name + ">";
@@ -159,10 +164,10 @@ internal sealed class SingleTypedConsumerHost<TConsumer, TMessage>(
 
 /// <summary>Drives an <see cref="IBatchMessageConsumer{TMessage}"/> — deserializes the batch to entities.</summary>
 internal sealed class BatchTypedConsumerHost<TConsumer, TMessage>(
-    IServiceProvider services, IStreamClient client, StreamPayloadSerializer serializer,
+    IServiceProvider services, StreamPayloadSerializer serializer,
     StreamNotificationListener notifications,
     ILogger<BatchTypedConsumerHost<TConsumer, TMessage>> logger, ConsumerHostOptions options)
-    : ConsumerHostBase<TConsumer>(services, client, notifications, logger, options)
+    : ConsumerHostBase<TConsumer>(services, notifications, logger, options)
     where TConsumer : class, IBatchMessageConsumer<TMessage>
 {
     protected override string Mode => "batch<" + typeof(TMessage).Name + ">";

@@ -1,4 +1,6 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -22,6 +24,21 @@ public sealed class PostgresFixture : IAsyncLifetime
         await _container.StartAsync();
         ConnectionString = _container.GetConnectionString();
 
+        // The business table stands in for "the caller's own schema": it is what the transactional
+        // tests write to, and it must be created without EF's EnsureCreated (which would refuse once
+        // the stream tables exist).
+        await using var connection = new NpgsqlConnection(ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            CREATE TABLE IF NOT EXISTS public.business_records (
+                id    bigint PRIMARY KEY,
+                value text NOT NULL
+            )
+            """;
+        await command.ExecuteNonQueryAsync();
+
         // Create the schema once up front so individual tests don't race on EnsureCreated.
         await using var provider = BuildProvider();
         await provider.GetRequiredService<IStreamClient>().InitializeAsync();
@@ -35,6 +52,19 @@ public sealed class PostgresFixture : IAsyncLifetime
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddStream(ConnectionString, configure ?? (_ => { }));
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// A container wired with the default connector: Junction rides on <see cref="TestDbContext"/>'s
+    /// connection, exactly as an application would.
+    /// </summary>
+    public ServiceProvider BuildTransactionalProvider(Action<StreamOptions>? configure = null)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDbContext<TestDbContext>(o => o.UseNpgsql(ConnectionString));
+        services.AddStream<TestDbContext>(configure ?? (_ => { }));
         return services.BuildServiceProvider();
     }
 

@@ -9,7 +9,7 @@
 one coherent API, no broker to run — it's just tables in a database you already have.
 
 ```csharp
-services.AddJunction<AppDbContext>(connectionString);
+services.AddJunction<AppDbContext>();
 ```
 
 ## Why
@@ -38,12 +38,14 @@ dotnet add package Junction
 
 ## Quick start
 
-Register once — Queue rides on your existing `DbContext` connection (so a message completion commits
-together with your own writes), Stream gets its own pooled connection:
+Register once — both Queue and Stream ride your existing `DbContext` connection, so an enqueue, an
+append, and your own writes commit together in one transaction. That also means neither needs an
+outbox table to publish reliably: there's nothing to relay, because the write already happened
+atomically with the rest of your transaction.
 
 ```csharp
 builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
-builder.Services.AddJunction<AppDbContext>(connectionString);
+builder.Services.AddJunction<AppDbContext>();
 ```
 
 **Queue** — enqueue a plain object, handle it in a background worker. The queue name defaults to the
@@ -89,9 +91,9 @@ Only need one of the two? `Junction.Queue`'s `AddQueue`/`AddQueueWorker` and `Ju
 ## Performance
 
 Both modules ship a [BenchmarkDotNet](https://benchmarkdotnet.org) suite
-(`benchmarks/Junction.Benchmarks`) covering enqueue/claim throughput, worker contention, event append
-(EF vs. bulk `COPY`), group commit and push-delivery latency. See
-[`docs/BENCHMARK.md`](docs/BENCHMARK.md) for how to run it and reference numbers.
+(`benchmarks/Junction.Benchmarks`) covering enqueue/claim throughput, worker contention, event append,
+group commit and push-delivery latency. See [`docs/BENCHMARK.md`](docs/BENCHMARK.md) for how to run it
+and reference numbers.
 
 ## Documentation
 

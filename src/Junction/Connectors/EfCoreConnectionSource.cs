@@ -5,14 +5,14 @@ using Microsoft.EntityFrameworkCore.Storage;
 namespace Junction.Connectors;
 
 /// <summary>
-/// The default connector: runs queue SQL on the connection of an existing EF Core
+/// The default connector: runs Queue or Stream SQL on the connection of an existing EF Core
 /// <see cref="DbContext"/> resolved from the current DI scope, and joins the context's current
 /// transaction when there is one.
 /// <para>
-/// Consequence — and the whole point: if your handler writes through the same <c>DbContext</c>,
-/// acknowledging the message is part of your <c>SaveChanges</c> transaction. Either both land or
+/// Consequence — and the whole point: if your own code writes through the same <c>DbContext</c>, a
+/// message completion or an append is part of your <c>SaveChanges</c> transaction. Either both land or
 /// neither does, so a crash mid-handler re-delivers the message instead of losing the work or
-/// double-applying it.
+/// double-applying it, and a producer never needs an outbox table to publish alongside its own writes.
 /// </para>
 /// </summary>
 public sealed class EfCoreConnectionSource(DbContext context) : IJunctionConnectionSource

@@ -14,10 +14,12 @@ Both modules share:
 - **One schema.** `junction` by default (`QueueOptions.Schema` / `JunctionDbContext.Schema`). Table
   names don't collide (`queues`, `messages`, `dead_letters`, `completed` vs. `streams`,
   `stream_events`, `consumer_cursors`).
-- **One connector abstraction.** `Junction.Connectors.IJunctionConnectionSource` is how the Queue
-  module gets the PostgreSQL connection it runs on — either an existing EF Core `DbContext` (so a
-  message completion commits together with your own writes, in the same transaction) or a connection
-  pool of its own.
+- **One connector abstraction.** `Junction.Connectors.IJunctionConnectionSource` is how a module gets
+  the PostgreSQL connection it runs on — either an existing EF Core `DbContext` (so a message
+  completion or an append commits together with your own writes, in the same transaction, with no
+  outbox table needed) or a connection pool of its own. `AddQueue<TContext>` / `AddStream<TContext>` /
+  `AddJunction<TContext>` use the former; `AddQueue` / `AddStream` / `AddJunction` (connection string
+  only) use the latter.
 - **One registration surface, one façade.** `AddJunction(...)` / `AddJunction<TContext>(...)` wire up
   both modules; `IJunctionClient` exposes them as `.Queue` and `.Stream`. Each module also has its own
   standalone registration (`AddQueue`, `AddStream`) for processes that only need one.
@@ -26,9 +28,6 @@ Both modules share:
 
 ## Known limitations
 
-- **`AddJunction<TContext>()` requires the connection string explicitly**, even though `TContext`
-  already has one: Queue borrows `TContext`'s connection, Stream gets its own pool built from the
-  string you pass.
 - **`Junction.Queue.Internal.HeaderSerializer` and `Junction.Stream.HeaderSerializer` behave
   differently on absent headers**: Queue's `Deserialize` returns `null`, Stream's returns an empty
   dictionary. Match the module you're calling.
@@ -86,7 +85,7 @@ services.AddQueue<AppDbContext>(serializer: new MessagePackPayloadSerializer());
 services.AddStream(connectionString, serializer: new MessagePackPayloadSerializer());
 
 // Or through the combined entry point:
-services.AddJunction<AppDbContext>(connectionString,
+services.AddJunction<AppDbContext>(
     queueSerializer: new MessagePackPayloadSerializer(),
     streamSerializer: new MessagePackPayloadSerializer());
 ```
@@ -156,7 +155,7 @@ public sealed class AuditConsumer : StreamConsumer<OrderPlaced>
 `JunctionOptions` composes `Queue` (`QueueOptions`) and `Stream` (`StreamOptions`) unchanged:
 
 ```csharp
-services.AddJunction<AppDbContext>(connectionString, o =>
+services.AddJunction<AppDbContext>(o =>
 {
     o.Queue.LeaseDuration = TimeSpan.FromSeconds(45);
     o.Queue.MaxAttempts = 8;
@@ -192,7 +191,7 @@ services.AddJunction<AppDbContext>(connectionString, o =>
 |---|---|---|
 | `AutoCreateSchema` | Create the schema via `EnsureCreated` on first use if missing. | `true` |
 | `EnableSensitiveDataLogging` | Enable EF Core sensitive data logging (payloads/parameters). Dev only. | `false` |
-| `BulkInsertThreshold` | Batch size at/above which appends use the BulkForge binary-`COPY` path instead of EF inserts. | `100` |
+| `BulkInsertThreshold` | Batch size at/above which appends switch to a bulk-insert path for higher throughput. | `100` |
 | `EnablePushDelivery` | Wake idle consumers via `LISTEN`/`NOTIFY` instead of polling only. | `true` |
 | `PushReconnectDelay` | Delay before reopening the push-delivery connection after it drops. | `5s` |
 | `EnableGroupCommit` | Coalesce single-event appends into grouped transactions via a background flusher. | `false` |
@@ -202,8 +201,6 @@ services.AddJunction<AppDbContext>(connectionString, o =>
 ## Not included
 
 - Samples (`samples/`) and .NET Aspire orchestration (`aspire/`).
-- Queue's bulk-enqueue path uses raw binary `COPY` with no extra dependency; Stream's bulk-append path
-  uses BulkForge. The two are independent by design.
 
 ## Verifying a build
 

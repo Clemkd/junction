@@ -17,10 +17,9 @@ public static class ServiceCollectionExtensions
 {
     /// <summary>
     /// Register both modules with their own connection pools, for callers with no EF Core context in
-    /// the picture. The Queue module's hot path runs on a rented connection (see <c>AddQueue</c>); the
-    /// Stream module owns a pooled <see cref="Stream.JunctionDbContext"/> factory (see
-    /// <c>AddStream</c>). Use <see cref="AddJunction{TContext}"/> instead when you want Queue
-    /// completions to ride along with your own EF Core transaction.
+    /// the picture. Each module then runs on a rented connection (see <c>AddQueue</c> / <c>AddStream</c>).
+    /// Use <see cref="AddJunction{TContext}"/> instead when you want enqueues, appends and completions
+    /// to ride along with your own EF Core transaction.
     /// </summary>
     /// <param name="queueSerializer">Serializer for the Queue module's typed handler API. Defaults to
     /// <see cref="JsonPayloadSerializer"/>.</param>
@@ -47,15 +46,12 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Register the Queue module on top of an existing EF Core context — so a handler's writes and a
-    /// message's completion commit together (see <c>AddQueue&lt;TContext&gt;</c>) — while the Stream
-    /// module gets its own pooled connection factory built from <paramref name="connectionString"/>.
+    /// Register both modules on top of an existing EF Core context — so an enqueue, an append, and the
+    /// caller's own writes all commit together (see <c>AddQueue&lt;TContext&gt;</c> /
+    /// <c>AddStream&lt;TContext&gt;</c>).
     /// <para>
-    /// The two modules cannot yet share one connection-acquisition strategy: the Stream module builds
-    /// its <see cref="Microsoft.EntityFrameworkCore.IDbContextFactory{TContext}"/> eagerly at
-    /// registration time, so its connection string must be supplied explicitly even though
-    /// <typeparamref name="TContext"/> already has one — a known asymmetry, tracked as a follow-up
-    /// (see <c>docs/DESIGN.md</c>), not silently papered over here.
+    /// <typeparamref name="TContext"/> must be registered (scoped, as <c>AddDbContext</c> does) and
+    /// must use the Npgsql provider. Its model does not need to know about either module's tables.
     /// </para>
     /// </summary>
     /// <param name="queueSerializer">Serializer for the Queue module's typed handler API. Defaults to
@@ -64,20 +60,18 @@ public static class ServiceCollectionExtensions
     /// to <see cref="JsonPayloadSerializer"/>.</param>
     public static IServiceCollection AddJunction<TContext>(
         this IServiceCollection services,
-        string connectionString,
         Action<JunctionOptions>? configure = null,
         IPayloadSerializer? queueSerializer = null,
         IPayloadSerializer? streamSerializer = null)
         where TContext : DbContext
     {
         ArgumentNullException.ThrowIfNull(services);
-        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
         var options = new JunctionOptions();
         configure?.Invoke(options);
 
         services.AddQueue<TContext>(o => CopyQueueOptions(options.Queue, o), queueSerializer);
-        services.AddStream(connectionString, o => CopyStreamOptions(options.Stream, o), streamSerializer);
+        services.AddStream<TContext>(o => CopyStreamOptions(options.Stream, o), streamSerializer);
         services.TryAddScoped<IJunctionClient, JunctionClient>();
 
         return services;

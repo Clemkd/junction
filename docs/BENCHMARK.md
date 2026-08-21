@@ -54,8 +54,8 @@ handlers.
 
 Three suites, in `benchmarks/Junction.Benchmarks/Stream/`:
 
-- **`AppendBenchmarks`** — EF inserts vs. the BulkForge binary-`COPY` path, across batch sizes; also
-  shows the allocation difference between the two (`MemoryDiagnoser`).
+- **`AppendBenchmarks`** — append throughput across batch sizes, including the allocation profile
+  (`MemoryDiagnoser`) of the row-by-row path vs. the bulk-insert path.
 - **`GroupCommitBenchmarks`** — many concurrent single-event appends, group commit on vs. off.
 - **`PollBenchmarks`** — read-path cost over a pre-seeded stream at two batch sizes.
 
@@ -68,10 +68,10 @@ Same environment as above. Write/read throughput, 50,000 events × 256 B, batche
 | Write | 37,973 | 9.27 MB/s |
 | Read | 88,514 | 21.6 MB/s |
 
-**Bulk append.** Batches at or above `StreamOptions.BulkInsertThreshold` (default 100) go through the
-BulkForge binary-`COPY` path instead of EF inserts — measured **~2.5–3.3× faster** writes (e.g. batch
-2000 × 256 B: 11k → 37k events/s) in the same offset-allocation transaction, so ordering and the
-no-loss guarantee are unchanged. Smaller batches stay on EF, which has lower fixed cost.
+**Bulk append.** Batches at or above `StreamOptions.BulkInsertThreshold` (default 100) switch to the
+bulk-insert path — measured **~2.5–3.3× faster** writes (e.g. batch 2000 × 256 B: 11k → 37k events/s)
+in the same offset-allocation transaction, so ordering and the no-loss guarantee are unchanged. Smaller
+batches use the row-by-row path, which has lower fixed cost.
 
 **Group commit.** For many small, concurrent single-event appends, `StreamOptions.EnableGroupCommit`
 coalesces them into grouped transactions:

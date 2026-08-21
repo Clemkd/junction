@@ -1,5 +1,6 @@
 using BulkForge.PostgreSql;
 using Junction;
+using Junction.Connectors;
 using Junction.Internal;
 using Junction.Stream.Internal;
 using Microsoft.EntityFrameworkCore;
@@ -14,9 +15,9 @@ namespace Junction.Stream;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Register the Stream module against a PostgreSQL database. Adds a pooled
-    /// <see cref="JunctionDbContext"/> factory, the shared <see cref="IEventProducer"/>
-    /// and the <see cref="IStreamClient"/> entry point.
+    /// Register the Stream module with its own connection pool, for callers with no EF Core context in
+    /// the picture. Appends then run on a rented connection, so they cannot join a transaction you
+    /// opened elsewhere — use <see cref="AddStream{TContext}"/> when you need that.
     /// </summary>
     /// <param name="serializer">
     /// Serializer for the typed consumer API (<see cref="ISingleMessageConsumer{T}"/>,
@@ -29,16 +30,59 @@ public static class ServiceCollectionExtensions
         Action<StreamOptions>? configure = null,
         IPayloadSerializer? serializer = null)
     {
+        ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
+        return AddCore(services, configure, serializer, _ => connectionString, hasConnector: false);
+    }
+
+    /// <summary>
+    /// Register the Stream module on top of an existing EF Core context — the same connector Queue
+    /// uses. Appends then run on <typeparamref name="TContext"/>'s connection and, when the caller
+    /// already has one open, inside its current transaction — so an append and the caller's own writes
+    /// commit together.
+    /// <para>
+    /// <typeparamref name="TContext"/> must be registered (scoped, as <c>AddDbContext</c> does) and
+    /// must use the Npgsql provider. Its model does not need to know about the stream tables.
+    /// </para>
+    /// </summary>
+    /// <param name="serializer">
+    /// Serializer for the typed consumer API (<see cref="ISingleMessageConsumer{T}"/>,
+    /// <see cref="StreamConsumer{T}"/>, <c>AppendAsync&lt;T&gt;</c>). Defaults to
+    /// <see cref="JsonPayloadSerializer"/>. Applies to this stream registration only.
+    /// </param>
+    public static IServiceCollection AddStream<TContext>(
+        this IServiceCollection services,
+        Action<StreamOptions>? configure = null,
+        IPayloadSerializer? serializer = null)
+        where TContext : DbContext
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddScoped<IJunctionConnectionSource>(sp =>
+            new EfCoreConnectionSource(sp.GetRequiredService<TContext>()));
+
+        return AddCore(services, configure, serializer, sp =>
+        {
+            using var scope = sp.CreateScope();
+            return scope.ServiceProvider.GetRequiredService<TContext>().Database.GetConnectionString()!;
+        }, hasConnector: true);
+    }
+
+    private static IServiceCollection AddCore(
+        IServiceCollection services,
+        Action<StreamOptions>? configure,
+        IPayloadSerializer? serializer,
+        Func<IServiceProvider, string> connectionString,
+        bool hasConnector)
+    {
         var options = new StreamOptions();
         configure?.Invoke(options);
         services.AddSingleton(options);
 
-        var effectiveConnectionString = NpgsqlConnectionStrings.EnableAutoPrepare(connectionString);
-
-        services.AddPooledDbContextFactory<JunctionDbContext>(db =>
+        services.AddPooledDbContextFactory<JunctionDbContext>((sp, db) =>
         {
+            var effectiveConnectionString = NpgsqlConnectionStrings.EnableAutoPrepare(connectionString(sp));
             db.UseNpgsql(effectiveConnectionString, npg =>
                 npg.MigrationsHistoryTable("__ef_migrations", JunctionDbContext.Schema));
             db.UseBulkForge(); // enables the binary-COPY bulk append path (BulkForge.PostgreSql)
@@ -51,9 +95,12 @@ public static class ServiceCollectionExtensions
         // Push delivery. Always registered, inert when disabled, and its LISTEN connection is only
         // opened once a consumer in this process actually waits for events.
         services.AddSingleton(sp => new StreamNotificationListener(
-            effectiveConnectionString, options,
+            NpgsqlConnectionStrings.EnableAutoPrepare(connectionString(sp)), options,
             sp.GetRequiredService<ILogger<StreamNotificationListener>>()));
 
+        // Group commit defers appends to a background flusher with no caller in the picture, so it
+        // can never join a caller's transaction — it always keeps its own pooled producer, regardless
+        // of which overload registered the module.
         if (options.EnableGroupCommit)
         {
             services.AddSingleton<EventProducer>();
@@ -61,12 +108,16 @@ public static class ServiceCollectionExtensions
                 new GroupCommitProducer(
                     sp.GetRequiredService<EventProducer>(), options, sp.GetRequiredService<StreamPayloadSerializer>()));
         }
+        else if (hasConnector)
+        {
+            services.TryAddScoped<IEventProducer, TransactionalEventProducer>();
+        }
         else
         {
             services.AddSingleton<IEventProducer, EventProducer>();
         }
 
-        services.AddSingleton<IStreamClient, StreamClient>();
+        services.TryAddScoped<IStreamClient, StreamClient>();
 
         return services;
     }
