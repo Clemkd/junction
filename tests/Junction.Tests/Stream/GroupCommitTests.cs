@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -87,5 +88,28 @@ public sealed class GroupCommitTests(PostgresFixture fixture)
         Assert.Equal(299, result.LastOffset);
         var stored = await TestHelpers.DrainAsync(client.GetConsumer(stream, "r"));
         Assert.Equal(300, stored.Count);
+    }
+
+    [Fact]
+    public async Task Group_commit_under_AddStream_of_TContext_never_rides_the_callers_transaction()
+    {
+        // Group commit defers appends to a background flusher with no caller in the picture — even
+        // when AddStream<TContext> registered the module, an append made "inside" a caller
+        // transaction still commits on the flusher's own connection and survives a rollback.
+        await using var sp = fixture.BuildTransactionalProvider(o => o.EnableGroupCommit = true);
+        string stream = PostgresFixture.NewName("gctx");
+
+        await using (var scope = sp.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<TestDbContext>();
+            var client = scope.ServiceProvider.GetRequiredService<IStreamClient>();
+
+            await using var transaction = await context.Database.BeginTransactionAsync();
+            await client.Producer.AppendAsync(stream, EventData.FromText("T", "not-transactional"));
+            await transaction.RollbackAsync();
+        }
+
+        var stats = await TestHelpers.WithClientAsync(sp, c => c.GetStreamStatsAsync(stream));
+        Assert.Equal(1, stats.EventCount);
     }
 }

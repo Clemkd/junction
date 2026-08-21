@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
-using System.Data;
 using System.Data.Common;
-using System.Text;
 using BulkForge;
 using BulkForge.PostgreSql;
 using Junction.Connectors;
@@ -18,6 +16,11 @@ namespace Junction.Stream.Internal;
 /// commits in the same transaction as those writes. Registered by <c>AddStream&lt;TContext&gt;</c>.
 /// Group commit and the connection-string-only registration keep <see cref="EventProducer"/> instead,
 /// since neither has a caller transaction to join.
+/// <para>
+/// When riding an ambient transaction, the target stream's row lock (taken by the offset reservation)
+/// is held for the rest of that transaction, not just the append — a caller doing unrelated work after
+/// appending, before committing, holds up every other producer on that stream for the same duration.
+/// </para>
 /// </summary>
 internal sealed class TransactionalEventProducer(
     IJunctionConnectionSource source, StreamOptions options, StreamPayloadSerializer serializer)
@@ -73,7 +76,7 @@ internal sealed class TransactionalEventProducer(
             ? await ctx.Database.BeginTransactionAsync(ct)
             : null;
 
-        var (streamId, first) = await ReserveRangeAsync(ctx, stream, events.Count, ct);
+        var (streamId, first) = await StreamAppendSql.ReserveRangeAsync(ctx, stream, events.Count, ct);
 
         long seq = first;
         var now = DateTime.UtcNow;
@@ -107,45 +110,6 @@ internal sealed class TransactionalEventProducer(
             await ownTransaction.CommitAsync(ct);
 
         return new AppendResult(stream, first, seq - 1, events.Count);
-    }
-
-    // Offset reservation, with and without the push-delivery notification folded in — same statement
-    // EventProducer uses, kept in sync with it.
-    private const string ReserveSql =
-        "UPDATE junction.streams SET next_seq = next_seq + @n WHERE name = @name RETURNING id, next_seq - @n";
-
-    private const string ReserveAndNotifySql =
-        ReserveSql + ", pg_notify('" + StreamNotificationListener.Channel + "', @name)";
-
-    private const int MaxNotifyPayloadBytes = 7900;
-
-    private static async Task<(long StreamId, long First)> ReserveRangeAsync(
-        JunctionDbContext ctx, string stream, int count, CancellationToken ct)
-    {
-        var conn = ctx.Database.GetDbConnection();
-        if (conn.State != ConnectionState.Open)
-            await conn.OpenAsync(ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = ctx.Database.CurrentTransaction!.GetDbTransaction();
-        cmd.CommandText = Encoding.UTF8.GetByteCount(stream) <= MaxNotifyPayloadBytes
-            ? ReserveAndNotifySql
-            : ReserveSql;
-        AddParam(cmd, "n", count);
-        AddParam(cmd, "name", stream);
-
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct))
-            throw new InvalidOperationException($"Stream '{stream}' does not exist during append.");
-        return (reader.GetInt64(0), reader.GetInt64(1));
-    }
-
-    private static void AddParam(DbCommand cmd, string name, object value)
-    {
-        var p = cmd.CreateParameter();
-        p.ParameterName = name;
-        p.Value = value;
-        cmd.Parameters.Add(p);
     }
 
     private static JunctionDbContext CreateContext(DbConnection connection, DbTransaction? transaction)

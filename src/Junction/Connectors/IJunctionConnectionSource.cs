@@ -4,14 +4,14 @@ namespace Junction.Connectors;
 
 /// <summary>
 /// The <b>connector</b>: where a module gets the PostgreSQL connection it runs its SQL on. Used by both
-/// Queue (<c>AddQueue&lt;TContext&gt;</c>) and Stream (<c>AddStream&lt;TContext&gt;</c>).
-/// <para>
-/// Neither module owns a connection pool of its own by default. Each borrows the connection you
-/// already have — by default the one behind your EF Core <c>DbContext</c> — which is what makes a
-/// message completion, an append, and your business writes commit <b>together</b>: same connection,
-/// same transaction, one <c>COMMIT</c>. That turns at-least-once delivery into effectively-once
-/// processing without any distributed transaction, and removes the need for an outbox table to publish
-/// alongside your own writes.
+/// Queue (<c>AddQueue&lt;TContext&gt;</c>) and Stream (<c>AddStream&lt;TContext&gt;</c>) for the paths
+/// that most benefit from riding your own connection — a Queue message completion and a Stream
+/// append — so that write and your business writes commit <b>together</b>: same connection, same
+/// transaction, one <c>COMMIT</c>. For Queue that turns at-least-once delivery into effectively-once
+/// processing without any distributed transaction; for Stream it removes the need for an outbox table
+/// to publish alongside your own writes. Reads, admin operations and (for Stream) consumer cursor
+/// commits still go through each module's own pooled connection regardless of which connector is
+/// registered — only the write path this summary describes borrows yours.
 /// </para>
 /// <para>
 /// A <see cref="DbConnection"/> cannot run two commands at once, so a source is scoped to one unit

@@ -1,13 +1,54 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
 
 using Junction.Stream;
+using Junction.Stream.Internal;
 
 namespace Junction.Tests.Stream;
 
 public sealed class RegistrationTests
 {
+    private const string FakeConnectionString = "Host=localhost;Database=fake;Username=x;Password=x";
+
+    [Fact]
+    public void AddStream_with_a_connection_string_registers_the_pooled_producer()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddStream(FakeConnectionString);
+        var provider = services.BuildServiceProvider();
+
+        Assert.IsType<EventProducer>(provider.GetRequiredService<IEventProducer>());
+    }
+
+    [Fact]
+    public void AddStream_of_TContext_registers_the_ambient_transaction_producer()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDbContext<TestDbContext>(o => o.UseNpgsql(FakeConnectionString));
+        services.AddStream<TestDbContext>();
+        var provider = services.BuildServiceProvider();
+
+        Assert.IsType<TransactionalEventProducer>(provider.GetRequiredService<IEventProducer>());
+    }
+
+    [Fact]
+    public void AddStream_of_TContext_with_group_commit_still_uses_the_pooled_producer()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDbContext<TestDbContext>(o => o.UseNpgsql(FakeConnectionString));
+        services.AddStream<TestDbContext>(o => o.EnableGroupCommit = true);
+        var provider = services.BuildServiceProvider();
+
+        // Group commit defers appends to a background flusher with no caller in the picture, so it
+        // never rides an ambient transaction — even when AddStream<TContext> is what registered it.
+        Assert.IsType<GroupCommitProducer>(provider.GetRequiredService<IEventProducer>());
+    }
+
     private sealed class NoInterface : IStreamConsumerDefinition
     {
         public string Stream => "s";
