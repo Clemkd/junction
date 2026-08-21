@@ -25,13 +25,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Junction.csproj references BulkForge (Clemkd/BulkForge) as a sibling repo checkout — see the
-      # comment on that ProjectReference. actions/checkout refuses a path outside this repo's own
-      # workspace, so a plain clone places it one level above $GITHUB_WORKSPACE instead — the same
-      # directory ../../../BulkForge resolves to from src/Junction/Junction.csproj.
-      - name: Checkout BulkForge
-        run: git clone --depth 1 https://github.com/Clemkd/BulkForge ../BulkForge
-
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:

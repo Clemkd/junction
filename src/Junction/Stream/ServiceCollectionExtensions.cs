@@ -1,4 +1,3 @@
-using BulkForge.PostgreSql;
 using Junction;
 using Junction.Connectors;
 using Junction.Internal;
@@ -95,7 +94,6 @@ public static class ServiceCollectionExtensions
             var effectiveConnectionString = NpgsqlConnectionStrings.EnableAutoPrepare(connectionString(sp));
             db.UseNpgsql(effectiveConnectionString, npg =>
                 npg.MigrationsHistoryTable("__ef_migrations", JunctionDbContext.Schema));
-            db.UseBulkForge(); // enables the binary-COPY bulk append path (BulkForge.PostgreSql)
             if (options.EnableSensitiveDataLogging)
                 db.EnableSensitiveDataLogging();
         });

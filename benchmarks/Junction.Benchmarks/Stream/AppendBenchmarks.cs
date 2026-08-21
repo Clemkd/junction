@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Junction.Benchmarks.Stream;
 
 /// <summary>
-/// Append latency &amp; allocations for one batch, EF inserts vs the BulkForge binary-COPY path,
+/// Append latency &amp; allocations for one batch, EF inserts vs the binary-COPY path,
 /// across batch sizes. Time is per batch of <see cref="BatchSize"/> events — divide to get per-event.
 /// </summary>
 [MemoryDiagnoser]

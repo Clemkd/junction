@@ -1,5 +1,4 @@
 using System.Data.Common;
-using BulkForge.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 
 namespace Junction.Stream.Internal;
@@ -21,7 +20,6 @@ internal static class BorrowedContext
     {
         var builder = new DbContextOptionsBuilder<JunctionDbContext>();
         builder.UseNpgsql(connection);
-        builder.UseBulkForge();
         var ctx = new JunctionDbContext(builder.Options);
         if (transaction is not null)
             ctx.Database.UseTransaction(transaction);

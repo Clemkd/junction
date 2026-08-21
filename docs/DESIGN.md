@@ -118,6 +118,22 @@ also land in the table's TOAST relation, which has its own autovacuum settings
 `ModelBuilder.AddJunctionModel()` does not carry any of this — EF has no model concept for storage
 parameters. Add `QueueSchema.TuningScript(...)` to your migration by hand with `migrationBuilder.Sql(...)`.
 
+## The bulk append path
+
+Above `StreamOptions.BulkInsertThreshold` (100 by default) an append streams its rows in with binary
+`COPY` instead of an INSERT per row, which skips the per-row parse/plan/tuple-build work. Below it, the
+EF insert wins on fixed cost. Both write the same rows, both run inside the transaction holding the
+offset reservation, and both let the sequence assign `id` — only `seq` is fixed in advance, because the
+reservation already decided it.
+
+Set the threshold to `0` to always use the EF path, or `1` to always use `COPY`.
+
+Both modules do this against `NpgsqlBinaryImporter` directly — `StreamBulkCopy` for Stream,
+`QueueCommands.CopyEnqueueAsync` for Queue. Each is one statement over a handful of columns whose shape
+this library owns, so a bulk-insert package dependency would buy little and cost a dependency the
+package has to carry, version and keep current. Junction's only dependencies are EF Core, Npgsql and
+the `Microsoft.Extensions.*` abstractions.
+
 ## Push delivery (LISTEN/NOTIFY)
 
 Both modules support push delivery: idle workers/consumers wait on a PostgreSQL `NOTIFY` instead of
@@ -322,8 +338,8 @@ services.AddJunction<AppDbContext>(o =>
 
 ## Verifying a build
 
-Requires `clemkd/BulkForge` checked out as a sibling of this repo (`../BulkForge`) — see the
-`ProjectReference` comment in `src/Junction/Junction.csproj`.
+No external checkout or private feed is needed — `dotnet restore` resolves everything from
+nuget.org.
 
 ```bash
 dotnet build
