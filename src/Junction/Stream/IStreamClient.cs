@@ -3,7 +3,7 @@ namespace Junction.Stream;
 /// <summary>Top-level entry point for producing, consuming and inspecting streams.</summary>
 public interface IStreamClient
 {
-    /// <summary>The shared producer.</summary>
+    /// <summary>The producer for this client.</summary>
     IEventProducer Producer { get; }
 
     /// <summary>

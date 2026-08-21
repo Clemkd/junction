@@ -3,9 +3,7 @@ namespace Junction.Stream;
 /// <summary>
 /// The PostgreSQL objects the Stream module needs, as idempotent DDL. Applied for you by
 /// <see cref="IStreamClient.InitializeAsync"/> when <see cref="StreamOptions.AutoCreateSchema"/> is
-/// on — as explicit <c>CREATE ... IF NOT EXISTS</c> statements rather than EF Core's
-/// <c>EnsureCreated</c>, which decides whether to run at all by checking whether the database has
-/// <b>any</b> tables, not whether the Stream module's own tables are among them.
+/// on; exposed here so you can paste it into a migration instead.
 /// </summary>
 public static class StreamSchema
 {

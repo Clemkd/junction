@@ -14,9 +14,9 @@ public sealed class StreamOptions
     public bool EnableSensitiveDataLogging { get; set; }
 
     /// <summary>
-    /// Batch size at or above which appends use the BulkForge binary-<c>COPY</c> path instead of
-    /// EF Core inserts. Smaller batches use EF (lower fixed overhead). Set to 0 to always use EF,
-    /// or 1 to always use bulk. Default: 100.
+    /// Batch size at or above which appends switch to a bulk-insert path for higher throughput.
+    /// Smaller batches use the row-by-row path (lower fixed overhead). Set to 0 to always use the
+    /// row-by-row path, or 1 to always use bulk. Default: 100.
     /// </summary>
     public int BulkInsertThreshold { get; set; } = 100;
 

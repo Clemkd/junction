@@ -9,11 +9,9 @@ internal sealed class StreamClient(
     IDbContextFactory<JunctionDbContext> factory,
     IEventProducer producer,
     StreamNotificationListener notifications,
-    StreamOptions options) : IStreamClient
+    StreamOptions options,
+    StreamInitGate initGate) : IStreamClient
 {
-    private readonly SemaphoreSlim _initGate = new(1, 1);
-    private volatile bool _initialized;
-
     public IEventProducer Producer { get; } = producer;
 
     public IEventConsumer GetConsumer(string stream, string consumerName) =>
@@ -21,24 +19,26 @@ internal sealed class StreamClient(
 
     public async Task InitializeAsync(CancellationToken ct = default)
     {
-        if (_initialized || !options.AutoCreateSchema)
+        if (initGate.Initialized || !options.AutoCreateSchema)
             return;
 
-        // Guard against concurrent schema-creation calls from multiple hosted consumers.
-        await _initGate.WaitAsync(ct);
+        // Guard against concurrent schema-creation calls from multiple hosted consumers. The gate is
+        // a singleton (see StreamInitGate) even though IStreamClient itself is scoped, so every
+        // scope's first InitializeAsync still folds into one DDL run.
+        await initGate.Gate.WaitAsync(ct);
         try
         {
-            if (_initialized)
+            if (initGate.Initialized)
                 return;
             await using var ctx = await factory.CreateDbContextAsync(ct);
             await using var cmd = await CreateCommandAsync(ctx, ct);
             cmd.CommandText = StreamSchema.CreateScript();
             await cmd.ExecuteNonQueryAsync(ct);
-            _initialized = true;
+            initGate.Initialized = true;
         }
         finally
         {
-            _initGate.Release();
+            initGate.Gate.Release();
         }
     }
 

@@ -79,6 +79,7 @@ public static class ServiceCollectionExtensions
         var options = new StreamOptions();
         configure?.Invoke(options);
         services.AddSingleton(options);
+        services.TryAddSingleton<StreamInitGate>();
 
         services.AddPooledDbContextFactory<JunctionDbContext>((sp, db) =>
         {

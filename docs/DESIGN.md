@@ -11,9 +11,10 @@ Junction is two engines behind one façade:
 
 Both modules share:
 
-- **One schema.** `junction` by default (`QueueOptions.Schema` / `JunctionDbContext.Schema`). Table
-  names don't collide (`queues`, `messages`, `dead_letters`, `completed` vs. `streams`,
-  `stream_events`, `consumer_cursors`).
+- **One schema.** `junction` by default. Table names don't collide (`queues`, `messages`,
+  `dead_letters`, `completed` vs. `streams`, `stream_events`, `consumer_cursors`). Configurable for
+  Queue (`QueueOptions.Schema`); fixed for Stream (`JunctionDbContext.Schema`) — moving Queue's schema
+  elsewhere puts the two modules' tables in different schemas.
 - **One connector abstraction.** `Junction.Connectors.IJunctionConnectionSource` is how a module gets
   the PostgreSQL connection it runs on — either an existing EF Core `DbContext` (so a message
   completion or an append commits together with your own writes, in the same transaction, with no
@@ -25,12 +26,6 @@ Both modules share:
   standalone registration (`AddQueue`, `AddStream`) for processes that only need one.
 - **Push delivery** via a shared LISTEN/NOTIFY engine — see below.
 - **One payload serializer abstraction** — see "Overriding the default serialization" below.
-
-## Known limitations
-
-- **`Junction.Queue.Internal.HeaderSerializer` and `Junction.Stream.HeaderSerializer` behave
-  differently on absent headers**: Queue's `Deserialize` returns `null`, Stream's returns an empty
-  dictionary. Match the module you're calling.
 
 ## Push delivery (LISTEN/NOTIFY)
 
@@ -57,7 +52,7 @@ abstract bases that default those names from `T` and the handler's own type:
   — so two consumer classes reading the same stream get two independent cursors without either naming
   the other.
 
-`QueueHandler<Order>` and `StreamConsumer<T>` are ordinary generic classes implementing the existing
+`QueueHandler<T>` and `StreamConsumer<T>` are ordinary generic classes implementing the existing
 typed interfaces, registered the same way (`AddJunctionQueueWorker<TConcreteHandler>()` /
 `AddJunctionStreamConsumer<TConcreteConsumer>()`) — `THandler`/`TConsumer` must be a closed type at the
 registration call site (e.g. `OrderHandler`, not an open `QueueHandler<>`).
@@ -194,7 +189,7 @@ services.AddJunction<AppDbContext>(o =>
 | `BulkInsertThreshold` | Batch size at/above which appends switch to a bulk-insert path for higher throughput. | `100` |
 | `EnablePushDelivery` | Wake idle consumers via `LISTEN`/`NOTIFY` instead of polling only. | `true` |
 | `PushReconnectDelay` | Delay before reopening the push-delivery connection after it drops. | `5s` |
-| `EnableGroupCommit` | Coalesce single-event appends into grouped transactions via a background flusher. | `false` |
+| `EnableGroupCommit` | Coalesce single-event appends into grouped transactions via a background flusher. These appends run on the flusher's own connection and do not join a caller's ambient transaction, even under `AddStream<TContext>`. | `false` |
 | `GroupCommitMaxBatch` | Maximum events coalesced into a single group-commit flush. | `1000` |
 | `GroupCommitLinger` | How long the flusher waits for more events to accumulate before flushing a partial batch. | `2ms` |
 
@@ -203,6 +198,9 @@ services.AddJunction<AppDbContext>(o =>
 - Samples (`samples/`) and .NET Aspire orchestration (`aspire/`).
 
 ## Verifying a build
+
+Requires `clemkd/BulkForge` checked out as a sibling of this repo (`../BulkForge`) — see the
+`ProjectReference` comment in `src/Junction/Junction.csproj`.
 
 ```bash
 dotnet build

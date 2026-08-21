@@ -85,15 +85,18 @@ public sealed class BillingConsumer : StreamConsumer<OrderPlaced>
 builder.Services.AddJunctionStreamConsumer<BillingConsumer>();
 ```
 
-Only need one of the two? `Junction.Queue`'s `AddQueue`/`AddQueueWorker` and `Junction.Stream`'s
-`AddStream`/`AddStreamConsumer` work standalone, with the same types.
+Only need one of the two? `Junction.Queue`'s `AddQueue<TContext>`/`AddQueueWorker` and
+`Junction.Stream`'s `AddStream<TContext>`/`AddStreamConsumer` work standalone, with the same types and
+the same shared-transaction guarantee. Each also has a connection-string-only overload
+(`AddQueue`/`AddStream`) for processes with no EF Core context in the picture — that one runs on its
+own connection and can't join a transaction you opened elsewhere.
 
 ## Performance
 
 Both modules ship a [BenchmarkDotNet](https://benchmarkdotnet.org) suite
 (`benchmarks/Junction.Benchmarks`) covering enqueue/claim throughput, worker contention, event append,
-group commit and push-delivery latency. See [`docs/BENCHMARK.md`](docs/BENCHMARK.md) for how to run it
-and reference numbers.
+group commit and read-path cost. See [`docs/BENCHMARK.md`](docs/BENCHMARK.md) for how to run it and
+reference numbers.
 
 ## Documentation
 

@@ -54,11 +54,15 @@ internal sealed class TransactionalEventProducer(
         await using var connection = await source.AcquireAsync(ct);
         await using var ctx = CreateContext(connection.Connection, connection.Transaction);
 
-        // Ensure the stream row exists — but only the first time we see it this process.
-        if (!_ensuredStreams.ContainsKey(stream))
+        // Ensure the stream row exists. Only cached when it ran outside any transaction (so it is
+        // durable regardless of what happens next) — when riding the caller's ambient transaction,
+        // a rollback would undo the row while the cache kept claiming it exists, so every append
+        // runs the (idempotent, ON CONFLICT DO NOTHING) ensure again instead of trusting the cache.
+        if (connection.Transaction is not null || !_ensuredStreams.ContainsKey(stream))
         {
             await StreamOps.EnsureStreamAsync(ctx, stream, ct);
-            _ensuredStreams.TryAdd(stream, 0);
+            if (connection.Transaction is null)
+                _ensuredStreams.TryAdd(stream, 0);
         }
 
         // Ride the caller's transaction when this connection already has one open; otherwise own a

@@ -1,6 +1,6 @@
 namespace Junction.Stream;
 
-/// <summary>Tuning for a hosted consumer (see <c>AddJunctionConsumer</c>).</summary>
+/// <summary>Tuning for a hosted consumer (see <c>AddStreamConsumer</c>/<c>AddJunctionStreamConsumer</c>).</summary>
 public sealed record ConsumerHostOptions
 {
     /// <summary>Delay between polls once the stream is fully drained.</summary>
