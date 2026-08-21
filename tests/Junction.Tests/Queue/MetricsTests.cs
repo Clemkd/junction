@@ -322,18 +322,30 @@ public sealed class MetricsTests(PostgresFixture fixture)
             Depth, (QueueDiagnostics.QueueTag, queue), (QueueDiagnostics.StateTag, "scheduled")));
 
         // Something is claimable, so the queue has an age to report.
-        Assert.True(harness.Recorder.Last(OldestReady, For(queue)) >= 0);
+        AssertGauge(harness.Recorder.Last(OldestReady, For(queue)), "oldest-ready age");
 
-        // Reported, and a size rather than a negative number. Deliberately not "> 0": the storage
-        // gauges measure the whole shared messages table, which every test in this collection writes
-        // to and empties, and pg_table_size of an empty table autovacuum has just truncated is
-        // legitimately 0. Asserting non-empty made this test fail about one run in three. What the
-        // test is actually for is that the collector fills the gauges, which is what is checked here.
-        Assert.True(harness.Recorder.Last(StorageBytes, (QueueDiagnostics.PartTag, "table")) >= 0);
-        Assert.True(harness.Recorder.Last(StorageBytes, (QueueDiagnostics.PartTag, "index")) >= 0);
-        Assert.NotNull(harness.Recorder.Last(StorageBytes, (QueueDiagnostics.PartTag, "table")));
-        Assert.NotNull(harness.Recorder.Last(StorageBytes, (QueueDiagnostics.PartTag, "index")));
-        Assert.NotNull(harness.Recorder.Last(DeadTuples));
+        // A size, not a non-empty one. The storage gauges measure the whole messages table, which every
+        // test in this collection writes to and empties, and pg_table_size of an empty table autovacuum
+        // has just truncated is legitimately 0 — asserting "> 0" failed about one run in three. What the
+        // test is for is that the collector fills the gauges.
+        AssertGauge(harness.Recorder.Last(StorageBytes, (QueueDiagnostics.PartTag, "table")), "table size");
+        AssertGauge(harness.Recorder.Last(StorageBytes, (QueueDiagnostics.PartTag, "index")), "index size");
+        AssertGauge(harness.Recorder.Last(DeadTuples), "dead tuples");
+    }
+
+    /// <summary>
+    /// A gauge was recorded, and its value is a count or a size rather than nonsense.
+    /// <para>
+    /// Split into two assertions on purpose. <c>Last</c> returns <c>double?</c>, and in C# a lifted
+    /// <c>null &gt;= 0</c> is <b>false</b> — so writing this as one comparison reports "the value is
+    /// negative" when what actually happened is "the gauge was never recorded". Those are different
+    /// bugs and the failure message has to say which.
+    /// </para>
+    /// </summary>
+    private static void AssertGauge(double? value, string what)
+    {
+        Assert.True(value.HasValue, $"No value was recorded for the {what} gauge.");
+        Assert.True(value!.Value >= 0, $"The {what} gauge reported {value.Value}, which is not a size.");
     }
 
     [Fact]
