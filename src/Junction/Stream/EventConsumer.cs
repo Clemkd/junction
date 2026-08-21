@@ -1,3 +1,5 @@
+using System.Data;
+using System.Data.Common;
 using System.Runtime.CompilerServices;
 using Junction.Connectors;
 using Junction.Internal;
@@ -5,6 +7,7 @@ using Junction.Stream.Internal;
 using Junction.Stream.Model;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Junction.Stream;
 
@@ -98,16 +101,18 @@ internal sealed class EventConsumer : IEventConsumer
     public async Task CommitAsync(long offset, CancellationToken ct = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(offset);
-        await SetPositionAsync(offset + 1, ct);
+        await SetPositionAsync(offset + 1, ct, monotonic: true);
     }
 
+    /// <summary>Rewinding (or skipping ahead) on purpose — the one path allowed to move a cursor back.</summary>
     public async Task SeekAsync(long offset, CancellationToken ct = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(offset);
-        await SetPositionAsync(offset, ct);
+        await SetPositionAsync(offset, ct, monotonic: false);
     }
 
-    public Task SeekToBeginningAsync(CancellationToken ct = default) => SetPositionAsync(0, ct);
+    public Task SeekToBeginningAsync(CancellationToken ct = default) =>
+        SetPositionAsync(0, ct, monotonic: false);
 
     public async Task WaitForEventsAsync(TimeSpan maxWait, CancellationToken ct = default)
     {
@@ -138,7 +143,7 @@ internal sealed class EventConsumer : IEventConsumer
             await EnsureLoadedAsync(ctx, ct);
             long head = await ctx.Streams.Where(s => s.Id == _streamId)
                 .Select(s => s.NextSequence).SingleAsync(ct);
-            await UpsertCursorAsync(ctx, head, ct);
+            await UpsertCursorAsync(ctx, head, ct, monotonic: false);
             Interlocked.Exchange(ref _position, head);
         }
         finally
@@ -182,15 +187,17 @@ internal sealed class EventConsumer : IEventConsumer
         }
     }
 
-    private async Task SetPositionAsync(long position, CancellationToken ct)
+    private async Task SetPositionAsync(long position, CancellationToken ct, bool monotonic)
     {
         await _gate.WaitAsync(ct);
         try
         {
             await using var ctx = await _factory.CreateDbContextAsync(ct);
             await EnsureLoadedAsync(ctx, ct);
-            await UpsertCursorAsync(ctx, position, ct);
-            Interlocked.Exchange(ref _position, position);
+            // The effective position, not the requested one: a commit the monotonic guard refused
+            // leaves the cursor where it was, and the in-memory value has to agree with the row.
+            long effective = await UpsertCursorAsync(ctx, position, ct, monotonic);
+            Interlocked.Exchange(ref _position, effective);
         }
         finally
         {
@@ -218,7 +225,7 @@ internal sealed class EventConsumer : IEventConsumer
             await using var connection = await source.AcquireAsync(ct);
             await using var ctx = BorrowedContext.Create(connection.Connection, connection.Transaction);
             await EnsureLoadedAsync(ctx, ct);
-            await UpsertCursorAsync(ctx, offset + 1, ct);
+            await UpsertCursorAsync(ctx, offset + 1, ct, monotonic: true);
         }
         finally
         {
@@ -327,17 +334,74 @@ internal sealed class EventConsumer : IEventConsumer
         _loaded = true;
     }
 
-    private async Task UpsertCursorAsync(JunctionDbContext ctx, long position, CancellationToken ct)
+    /// <summary>
+    /// Write the cursor and return the position it actually holds afterwards.
+    /// <para>
+    /// A <b>commit</b> only ever moves a cursor forward, and <c>GREATEST</c> makes the statement itself
+    /// enforce that rather than trusting every caller to. Without it a cursor can go backwards, and the
+    /// damage is not a duplicate but an unbounded one: two readers sharing a consumer name — which a
+    /// rolling deployment produces on purpose for a few seconds — can pull each other back and reprocess
+    /// the same range indefinitely. It also bounds what a stale in-memory position can do, since the
+    /// database now refuses the regression the process would otherwise write.
+    /// </para>
+    /// <para>
+    /// A <b>seek</b> passes <paramref name="monotonic"/> as <c>false</c>: rewinding is the entire point
+    /// of <see cref="SeekAsync"/> and <see cref="SeekToBeginningAsync"/>, so those must be able to do
+    /// what a commit must not.
+    /// </para>
+    /// </summary>
+    private async Task<long> UpsertCursorAsync(
+        JunctionDbContext ctx, long position, CancellationToken ct, bool monotonic = true)
     {
-        var now = DateTime.UtcNow;
-        await ctx.Database.ExecuteSqlAsync(
-            $"""
-             INSERT INTO junction.consumer_cursors (stream_id, consumer_name, position, updated_at)
-             VALUES ({_streamId}, {Name}, {position}, {now})
-             ON CONFLICT (stream_id, consumer_name)
-             DO UPDATE SET position = EXCLUDED.position, updated_at = EXCLUDED.updated_at
-             """,
-            ct);
+        // Raw command rather than Database.SqlQuery: that wraps the statement in a subquery, which an
+        // INSERT … RETURNING cannot be. Bound to the context's connection and current transaction, so
+        // it joins the caller's transaction on the borrowed-connection path exactly like the rest.
+        var connection = ctx.Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open)
+            await connection.OpenAsync(ct);
+
+        await using var cmd = connection.CreateCommand();
+        cmd.Transaction = ctx.Database.CurrentTransaction?.GetDbTransaction();
+        cmd.CommandText = monotonic ? MonotonicCursorUpsert : AbsoluteCursorUpsert;
+        AddParam(cmd, "stream", _streamId);
+        AddParam(cmd, "consumer", Name);
+        AddParam(cmd, "position", position);
+        AddParam(cmd, "now", DateTime.UtcNow);
+
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct));
+    }
+
+    /// <summary>
+    /// A commit. <c>GREATEST</c> is the guard, and <c>RETURNING</c> is what makes the refusal legible:
+    /// the caller learns the position the cursor actually holds, so a reader whose commit was refused
+    /// jumps to the high-water mark instead of replaying from where it thought it was.
+    /// </summary>
+    private const string MonotonicCursorUpsert =
+        """
+        INSERT INTO junction.consumer_cursors (stream_id, consumer_name, position, updated_at)
+        VALUES (@stream, @consumer, @position, @now)
+        ON CONFLICT (stream_id, consumer_name)
+        DO UPDATE SET position = GREATEST(consumer_cursors.position, EXCLUDED.position),
+                      updated_at = EXCLUDED.updated_at
+        RETURNING position
+        """;
+
+    /// <summary>A seek: places the cursor wherever it is told, backwards included.</summary>
+    private const string AbsoluteCursorUpsert =
+        """
+        INSERT INTO junction.consumer_cursors (stream_id, consumer_name, position, updated_at)
+        VALUES (@stream, @consumer, @position, @now)
+        ON CONFLICT (stream_id, consumer_name)
+        DO UPDATE SET position = EXCLUDED.position, updated_at = EXCLUDED.updated_at
+        RETURNING position
+        """;
+
+    private static void AddParam(DbCommand cmd, string name, object value)
+    {
+        var p = cmd.CreateParameter();
+        p.ParameterName = name;
+        p.Value = value;
+        cmd.Parameters.Add(p);
     }
 }
 
