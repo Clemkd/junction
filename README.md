@@ -1,5 +1,7 @@
 # Junction
 
+[![CI](https://github.com/Clemkd/junction/actions/workflows/ci.yml/badge.svg)](https://github.com/Clemkd/junction/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Clemkd/junction/branch/main/graph/badge.svg)](https://codecov.io/gh/Clemkd/junction)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](src/Junction/Junction.csproj)
 
