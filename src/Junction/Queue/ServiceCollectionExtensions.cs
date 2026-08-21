@@ -36,8 +36,8 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.TryAddScoped<IJunctionConnectionSource>(sp =>
-            new EfCoreConnectionSource(sp.GetRequiredService<TContext>()));
+        services.TryAddScoped(sp =>
+            new QueueConnectionSource(new EfCoreConnectionSource(sp.GetRequiredService<TContext>())));
 
         // The listener needs a connection of its own; borrow the context's connection string for it.
         return AddCore(services, configure, serializer, sp =>
@@ -71,8 +71,8 @@ public static class ServiceCollectionExtensions
         string effectiveConnectionString = NpgsqlConnectionStrings.EnableAutoPrepare(connectionString);
 
         services.TryAddSingleton(_ => NpgsqlDataSource.Create(effectiveConnectionString));
-        services.TryAddScoped<IJunctionConnectionSource>(sp =>
-            new NpgsqlConnectionSource(sp.GetRequiredService<NpgsqlDataSource>()));
+        services.TryAddScoped(sp =>
+            new QueueConnectionSource(new NpgsqlConnectionSource(sp.GetRequiredService<NpgsqlDataSource>())));
 
         return AddCore(services, configure, serializer, _ => effectiveConnectionString);
     }
@@ -207,7 +207,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton(new QueuePayloadSerializer(serializer ?? new JsonPayloadSerializer()));
         services.TryAddScoped<IQueueClient>(sp => new QueueClient(
             sp.GetRequiredService<QueueCatalog>(),
-            sp.GetRequiredService<IJunctionConnectionSource>(),
+            sp.GetRequiredService<QueueConnectionSource>().Value,
             sp.GetRequiredService<QueuePayloadSerializer>()));
 
         services.AddSingleton(new QueueListenerConnection(listenerConnectionString));

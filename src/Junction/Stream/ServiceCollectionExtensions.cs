@@ -59,8 +59,8 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.TryAddScoped<IJunctionConnectionSource>(sp =>
-            new EfCoreConnectionSource(sp.GetRequiredService<TContext>()));
+        services.TryAddScoped(sp =>
+            new StreamConnectionSource(new EfCoreConnectionSource(sp.GetRequiredService<TContext>())));
 
         return AddCore(services, configure, serializer, sp =>
         {

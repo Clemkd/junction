@@ -23,9 +23,10 @@ namespace Junction.Stream.Internal;
 /// </para>
 /// </summary>
 internal sealed class TransactionalEventProducer(
-    IJunctionConnectionSource source, StreamOptions options, StreamPayloadSerializer serializer)
+    StreamConnectionSource connectionSource, StreamOptions options, StreamPayloadSerializer serializer)
     : IEventProducer
 {
+    private readonly IJunctionConnectionSource _source = connectionSource.Value;
     private readonly ConcurrentDictionary<string, byte> _ensuredStreams = new();
 
     public Task<long> AppendAsync<T>(
@@ -54,7 +55,7 @@ internal sealed class TransactionalEventProducer(
         if (events.Count == 0)
             throw new ArgumentException("At least one event is required.", nameof(events));
 
-        await using var connection = await source.AcquireAsync(ct);
+        await using var connection = await _source.AcquireAsync(ct);
         await using var ctx = CreateContext(connection.Connection, connection.Transaction);
 
         // Ensure the stream row exists. Only cached when it ran outside any transaction (so it is
