@@ -3,6 +3,7 @@ using System.Data;
 using System.Data.Common;
 using System.Text;
 using BulkForge;
+using BulkForge.PostgreSql;
 using Junction.Connectors;
 using Junction.Stream.Model;
 using Microsoft.EntityFrameworkCore;
