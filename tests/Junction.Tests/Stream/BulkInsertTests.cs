@@ -6,7 +6,7 @@ using Junction.Stream;
 namespace Junction.Tests.Stream;
 
 /// <summary>
-/// Exercises the BulkForge binary-COPY append path (forced via a threshold of 1) and asserts it is
+/// Exercises the binary-COPY append path (forced via a threshold of 1) and asserts it is
 /// byte-for-byte equivalent to the EF path, including offsets, payloads, keys and headers.
 /// </summary>
 [Collection("postgres-stream")]

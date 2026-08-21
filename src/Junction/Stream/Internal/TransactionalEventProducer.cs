@@ -1,7 +1,4 @@
 using System.Collections.Concurrent;
-using System.Data.Common;
-using BulkForge;
-using BulkForge.PostgreSql;
 using Junction.Connectors;
 using Junction.Stream.Model;
 using Microsoft.EntityFrameworkCore;
@@ -56,7 +53,7 @@ internal sealed class TransactionalEventProducer(
             throw new ArgumentException("At least one event is required.", nameof(events));
 
         await using var connection = await _source.AcquireAsync(ct);
-        await using var ctx = CreateContext(connection.Connection, connection.Transaction);
+        await using var ctx = BorrowedContext.Create(connection.Connection, connection.Transaction);
 
         // Ensure the stream row exists. Only cached when it ran outside any transaction (so it is
         // durable regardless of what happens next) — when riding the caller's ambient transaction,
@@ -97,11 +94,11 @@ internal sealed class TransactionalEventProducer(
         }
 
         int threshold = options.BulkInsertThreshold;
-        if (threshold > 0 && events.Count >= threshold)
-        {
-            await ctx.Records.BulkInsertAsync(entities, cancellationToken: ct);
-        }
-        else
+        bool bulk = threshold > 0 && events.Count >= threshold;
+
+        // TryWriteAsync declines when the connection is not Npgsql, which is also the fallback for a
+        // batch below the threshold: the EF insert writes exactly the same rows either way.
+        if (!bulk || !await StreamBulkCopy.TryWriteAsync(ctx, entities, ct))
         {
             ctx.Records.AddRange(entities);
             await ctx.SaveChangesAsync(ct);
@@ -113,14 +110,4 @@ internal sealed class TransactionalEventProducer(
         return new AppendResult(stream, first, seq - 1, events.Count);
     }
 
-    private static JunctionDbContext CreateContext(DbConnection connection, DbTransaction? transaction)
-    {
-        var builder = new DbContextOptionsBuilder<JunctionDbContext>();
-        builder.UseNpgsql(connection);
-        builder.UseBulkForge();
-        var ctx = new JunctionDbContext(builder.Options);
-        if (transaction is not null)
-            ctx.Database.UseTransaction(transaction);
-        return ctx;
-    }
 }

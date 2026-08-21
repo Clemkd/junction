@@ -1,4 +1,3 @@
-using BulkForge.PostgreSql;
 using Junction;
 using Junction.Connectors;
 using Junction.Internal;
@@ -76,6 +75,15 @@ public static class ServiceCollectionExtensions
         Func<IServiceProvider, string> connectionString,
         bool hasConnector)
     {
+        // Same trap as the Queue module: options are last-wins and the connector is first-wins, so a
+        // second registration silently mixes the two calls. See AddQueue's guard.
+        if (services.Any(d => d.ServiceType == typeof(StreamOptions)))
+            throw new InvalidOperationException(
+                "The Stream module is already registered. AddStream/AddStream<TContext> (and AddJunction, " +
+                "which calls them) must be called once per container: a second call would keep the " +
+                "first call's connector while replacing its options. Configure everything in the one " +
+                "call instead.");
+
         var options = new StreamOptions();
         configure?.Invoke(options);
         services.AddSingleton(options);
@@ -86,7 +94,6 @@ public static class ServiceCollectionExtensions
             var effectiveConnectionString = NpgsqlConnectionStrings.EnableAutoPrepare(connectionString(sp));
             db.UseNpgsql(effectiveConnectionString, npg =>
                 npg.MigrationsHistoryTable("__ef_migrations", JunctionDbContext.Schema));
-            db.UseBulkForge(); // enables the binary-COPY bulk append path (BulkForge.PostgreSql)
             if (options.EnableSensitiveDataLogging)
                 db.EnableSensitiveDataLogging();
         });
@@ -99,9 +106,12 @@ public static class ServiceCollectionExtensions
             NpgsqlConnectionStrings.EnableAutoPrepare(connectionString(sp)), options,
             sp.GetRequiredService<ILogger<StreamNotificationListener>>()));
 
-        // Group commit defers appends to a background flusher with no caller in the picture, so it
-        // can never join a caller's transaction — it always keeps its own pooled producer, regardless
-        // of which overload registered the module.
+        // Group commit defers appends to a background flusher with no caller in the picture, so it can
+        // never join a caller's transaction — it keeps its own pooled producer even under
+        // AddStream<TContext>. That is a deliberate precedence, pinned by
+        // RegistrationTests.AddStream_of_TContext_with_group_commit_still_uses_the_pooled_producer, and
+        // it is the one case where enabling an option quietly withdraws the shared-transaction
+        // guarantee — see the remarks on StreamOptions.EnableGroupCommit.
         if (options.EnableGroupCommit)
         {
             services.AddSingleton<EventProducer>();
@@ -118,7 +128,16 @@ public static class ServiceCollectionExtensions
             services.AddSingleton<IEventProducer, EventProducer>();
         }
 
-        services.TryAddScoped<IStreamClient, StreamClient>();
+        // Built by hand rather than by constructor injection so the connector stays optional:
+        // GetService, not GetRequiredService, because AddStream(connectionString) registers none and
+        // the client then keeps its cursor writes on the module's own pool.
+        services.TryAddScoped<IStreamClient>(sp => new StreamClient(
+            sp.GetRequiredService<IDbContextFactory<JunctionDbContext>>(),
+            sp.GetRequiredService<IEventProducer>(),
+            sp.GetRequiredService<StreamNotificationListener>(),
+            sp.GetRequiredService<StreamOptions>(),
+            sp.GetRequiredService<StreamInitGate>(),
+            sp.GetService<StreamConnectionSource>()));
 
         return services;
     }

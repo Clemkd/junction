@@ -54,10 +54,11 @@ public sealed class QueueOptions
 
     /// <summary>
     /// When <c>true</c> (default), <see cref="IQueueClient.InitializeAsync"/> also applies the
-    /// storage tuning that keeps a high-churn queue table fast: a lower <c>fillfactor</c> (room for
-    /// in-place lease updates) and an aggressive autovacuum threshold (claims and completions produce
-    /// dead tuples at the same rate as throughput; default autovacuum settings let them pile up and
-    /// every claim then has to step over them).
+    /// storage tuning that keeps a high-churn queue table fast: a lower <c>fillfactor</c> (so an
+    /// updated row's new version stays on its page) and a lower autovacuum threshold with a raised
+    /// budget. Claims and completions produce dead tuples at the same rate as throughput; with default
+    /// autovacuum settings they pile up and every claim has to step over them. See
+    /// <see cref="QueueSchema.TuningScript"/> for the individual settings and why each is where it is.
     /// </summary>
     public bool ApplyStorageTuning { get; set; } = true;
 
@@ -159,9 +160,18 @@ public sealed class QueueOptions
     /// When <c>true</c>, enqueues emit a <c>NOTIFY</c> and idle workers wait on <c>LISTEN</c> instead of
     /// polling, so a new message wakes a worker within a round-trip instead of within
     /// <see cref="QueueWorkerOptions.MaxPollInterval"/> — and an idle fleet costs no queries at all.
-    /// Requires a connection the library can dedicate to listening: enabled automatically when you
-    /// register with a connection string / <c>NpgsqlDataSource</c>, or when
-    /// <see cref="ListenerConnectionString"/> is set. Default: <c>false</c>.
+    /// <para>
+    /// Opt-in — <c>false</c> by default, and nothing turns it on for you. It needs a connection the
+    /// library can dedicate to listening, which it takes from the connection string you registered
+    /// with, or from the one behind your <c>DbContext</c>, or from
+    /// <see cref="ListenerConnectionString"/> when neither is usable. If none of the three yields a
+    /// connection string the listener logs a warning at startup and workers keep polling.
+    /// </para>
+    /// <para>
+    /// Note the asymmetry with the Stream module, whose <c>StreamOptions.EnablePushDelivery</c>
+    /// defaults to <c>true</c>: registering both modules gives you push on Stream and polling on Queue
+    /// until you set this.
+    /// </para>
     /// </summary>
     public bool EnableNotifications { get; set; }
 

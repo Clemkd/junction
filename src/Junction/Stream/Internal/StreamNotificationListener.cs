@@ -70,7 +70,7 @@ internal sealed class StreamNotificationListener : IDisposable, IAsyncDisposable
     /// <summary>
     /// Announce that this process is the active reader of <paramref name="consumerName"/> on
     /// <paramref name="stream"/>, and warn if someone else already is. A consumer name identifies
-    /// one reader (see DESIGN §5): two workers sharing a name share a cursor and both handle the
+    /// one reader: two workers sharing a name share a cursor and both handle the
     /// same events — a naming bug that otherwise shows up as unexplained duplicate processing.
     ///
     /// The claim is a session-scoped advisory lock taken on the listen connection, so it needs no

@@ -134,19 +134,54 @@ public static class QueueSchema
     /// are produced at exactly the throughput rate. With stock autovacuum settings (vacuum at 20% of
     /// the table) a busy queue accumulates dead tuples faster than they are reclaimed, and claim
     /// latency climbs with the bloat — the classic "our Postgres queue got slow" failure.
+    /// <para>
+    /// The settings below vacuum this table considerably more often than the defaults, but they are
+    /// <b>throttled</b>. An earlier version removed the throttle outright
+    /// (<c>autovacuum_vacuum_cost_delay = 0</c>) on the grounds that this is a small table by design —
+    /// which is true right up to the moment it is not. A backlog spike is precisely when vacuum matters
+    /// most and precisely when an unthrottled one competes with the claim path for I/O. Raising the
+    /// budget rather than removing the brake gets the same throughput of reclaimed pages without that
+    /// failure mode.
+    /// </para>
     /// <list type="bullet">
-    /// <item><c>fillfactor = 85</c> leaves room on each page for the lease update to stay in-place (HOT), avoiding index churn.</item>
-    /// <item><c>autovacuum_vacuum_scale_factor = 0.02</c> + a low threshold vacuum this table continuously instead of in rare, painful sweeps.</item>
-    /// <item><c>autovacuum_vacuum_cost_delay = 0</c> lets that vacuum run at full speed; it is a small table by design.</item>
+    /// <item>
+    /// <c>autovacuum_vacuum_scale_factor = 0.05</c> — vacuum at 5% dead tuples rather than the stock
+    /// 20%: four times more often, where the previous 0.02 was ten times.
+    /// </item>
+    /// <item>
+    /// <c>autovacuum_vacuum_threshold = 1000</c> — the threshold, not the scale factor, is what governs
+    /// a small table. At 100 a queue holding a few hundred rows was vacuumed every hundred-odd
+    /// completions, effectively continuously, for no benefit at that size.
+    /// </item>
+    /// <item>
+    /// <c>autovacuum_vacuum_cost_delay = 2</c> (the server default) with
+    /// <c>autovacuum_vacuum_cost_limit = 2000</c> — ten times the default budget per cycle, so the
+    /// vacuum keeps up, while the delay still yields I/O to the queries that pay the bills.
+    /// </item>
+    /// <item>
+    /// <c>autovacuum_analyze_scale_factor = 0.05</c> — a queue's row count swings by orders of
+    /// magnitude, and the claim's plan depends on the estimate being roughly current.
+    /// </item>
+    /// <item>
+    /// <c>fillfactor = 85</c> — reserves space so an updated row's new version stays on its original
+    /// page. Note what this does <i>not</i> buy: none of Junction's updates can be a HOT update, because
+    /// every column they touch is used by an index — <c>state</c> appears in both partial index
+    /// predicates, and the heartbeat's <c>lease_expires_at</c> is the key of
+    /// <c>ix_messages_lease</c>. Measured on 18: 0 HOT updates out of 100 for both the claim and the
+    /// heartbeat, against 51 out of 100 for an update touching only an unindexed column. What the
+    /// reserve still buys is locality — the new version does not extend the relation, and vacuum
+    /// reclaims the old one from the same page.
+    /// </item>
     /// </list>
     /// </summary>
     public static string TuningScript(string schema = DefaultSchema) =>
         $"""
          ALTER TABLE {schema}.messages SET (
              fillfactor = 85,
-             autovacuum_vacuum_scale_factor = 0.02,
-             autovacuum_vacuum_threshold = 100,
-             autovacuum_vacuum_cost_delay = 0,
+             autovacuum_vacuum_scale_factor = 0.05,
+             autovacuum_vacuum_threshold = 1000,
+             autovacuum_vacuum_cost_delay = 2,
+             autovacuum_vacuum_cost_limit = 2000,
              autovacuum_analyze_scale_factor = 0.05
          );
          """;

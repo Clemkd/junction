@@ -256,7 +256,33 @@ internal abstract class QueueWorkerHostBase<THandler>(
             while (await reader.WaitToReadAsync(stoppingToken))
             {
                 while (reader.TryRead(out var unit))
-                    await ProcessUnitAsync(unit, queue, workerId, stoppingToken);
+                {
+                    // Guarded per unit, not around the loop. ProcessUnitAsync handles its own failures,
+                    // but the handlers that do so talk to the database themselves — FailAsync,
+                    // AbandonAsync, DeadLetterAsync — and a connection that broke at commit time breaks
+                    // those too. An exception escaping from there used to end this processor for the
+                    // life of the process: the worker silently lost one of its Concurrency slots, and
+                    // kept running with fewer. Losing the unit is bad; losing the slot is worse, and it
+                    // is invisible.
+                    try
+                    {
+                        await ProcessUnitAsync(unit, queue, workerId, stoppingToken);
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // The message keeps its lease, so it comes back when that expires — the same
+                        // path a killed worker takes.
+                        logger.LogError(ex,
+                            "Message(s) {Ids} on '{Queue}' could not be completed or reported; leaving " +
+                            "them to their lease. This processor continues.",
+                            Ids(unit.Messages), queue);
+                        unit.Guard?.Dispose();
+                    }
+                }
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

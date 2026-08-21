@@ -9,15 +9,21 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    # The whole suite runs against both ends of the supported range, so "PostgreSQL 13+" is verified
+    # rather than asserted: 13 is the floor (the release that made gen_random_uuid() a core function)
+    # and 18 is where the uuidv7 lease-token branch is exercised. Coverage is uploaded from the 18 leg
+    # only — both legs run the same tests, so a second upload would just duplicate the report.
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['13-alpine', '18-alpine']
+
+    env:
+      JUNCTION_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
+
     steps:
       - uses: actions/checkout@v4
-
-      # Junction.csproj references BulkForge (Clemkd/BulkForge) as a sibling repo checkout — see the
-      # comment on that ProjectReference. actions/checkout refuses a path outside this repo's own
-      # workspace, so a plain clone places it one level above $GITHUB_WORKSPACE instead — the same
-      # directory ../../../BulkForge resolves to from src/Junction/Junction.csproj.
-      - name: Checkout BulkForge
-        run: git clone --depth 1 https://github.com/Clemkd/BulkForge ../BulkForge
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -37,6 +43,7 @@ jobs:
           --results-directory ./coverage
 
       - name: Upload coverage to Codecov
+        if: matrix.postgres == '18-alpine'
         uses: codecov/codecov-action@v4
         with:
           directory: ./coverage

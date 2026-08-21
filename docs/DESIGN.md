@@ -28,6 +28,112 @@ Both modules share:
 - **Push delivery** via a shared LISTEN/NOTIFY engine — see below.
 - **One payload serializer abstraction** — see "Overriding the default serialization" below.
 
+## PostgreSQL versions
+
+**Supported: 13 and later, vanilla, no extensions.**
+
+The floor is set by one function. `gen_random_uuid()` — which mints the lease token that fences every
+completion — became a core function in PostgreSQL 13; before that it needed `pgcrypto`. Everything
+else Junction runs predates that by years: `FOR UPDATE SKIP LOCKED` (9.5), identity columns (10),
+`unnest` over several arrays (9.4), aggregate `FILTER` (9.4), partial indexes, `ON CONFLICT` (9.5),
+`jsonb` (9.4). Nothing uses `MERGE`, `NULLS NOT DISTINCT`, or any other newer syntax.
+
+From **18** the lease token is `uuidv7()` instead. It is time-ordered, so an in-flight row tells you
+when it was claimed without joining anything — useful precisely when you are looking at a message
+that is stuck. Nothing else changes: the token is never indexed and only ever compared for equality,
+so this buys diagnosability, not throughput.
+
+The choice is made from the server, once per process, on the first operation that needs it
+(`QueueCatalog.DetectServerAsync`, reading `current_setting('server_version_num')`). Two properties
+matter:
+
+- **The portable statements are the default.** A catalog that has not yet asked the server hands out
+  `gen_random_uuid()`, so there is no window in which a claim carrying `uuidv7()` could reach a
+  server that does not have it.
+- **A server below the floor is refused up front**, with its `server_version_num` in the message,
+  rather than failing later on a missing function.
+
+Detection runs even when `AutoCreateSchema` is off: the schema may be yours to create, but the
+dialect still has to match the server.
+
+Both ends of the range are tested, not assumed — CI runs the full suite against 13 and 18, and
+locally `JUNCTION_TEST_POSTGRES_IMAGE=postgres:13-alpine dotnet test tests/Junction.Tests` does the
+same.
+
+## Storage tuning and autovacuum
+
+A queue table is the most update- and delete-heavy table in a system: every message is inserted,
+updated once per attempt, then removed. Dead tuples are produced at exactly the throughput rate, and
+with stock autovacuum settings (vacuum at 20% of the table) they accumulate faster than they are
+reclaimed — claim latency then climbs with the bloat. That is the classic "our Postgres queue got
+slow" failure, and `QueueOptions.ApplyStorageTuning` (on by default) is what avoids it.
+
+The settings vacuum considerably more often than the defaults, but they stay **throttled**:
+
+| Setting | Value | Stock | Why |
+|---|---|---|---|
+| `autovacuum_vacuum_scale_factor` | `0.05` | `0.2` | Vacuum at 5% dead tuples: four times more often |
+| `autovacuum_vacuum_threshold` | `1000` | `50` | The threshold, not the scale factor, governs a small table |
+| `autovacuum_vacuum_cost_delay` | `2` | `2` | Keeps the brake on — see below |
+| `autovacuum_vacuum_cost_limit` | `2000` | `200` | Ten times the budget per cycle, so vacuum keeps up |
+| `autovacuum_analyze_scale_factor` | `0.05` | `0.1` | A queue's row count swings; the claim's plan depends on the estimate |
+| `fillfactor` | `85` | `100` | An updated row's new version stays on its page |
+
+An earlier version removed the throttle outright (`autovacuum_vacuum_cost_delay = 0`) on the grounds
+that this is a small table by design. That is true right up to the moment it is not: a backlog spike is
+precisely when vacuum matters most and precisely when an unthrottled one competes with the claim path
+for I/O. Raising the budget rather than removing the brake reclaims pages just as fast without that
+failure mode.
+
+### What `fillfactor` does not buy here
+
+The reserve is worth having, but not for the reason it is usually chosen. **No update Junction performs
+on `messages` can be a HOT update**, because PostgreSQL disallows HOT whenever a column used by an
+index is modified, and every column these updates touch is:
+
+- the claim sets `state`, which appears in the predicate of *both* partial indexes;
+- the heartbeat sets `lease_expires_at`, which is the key of `ix_messages_lease`.
+
+Measured on PostgreSQL 18, 100 rows per statement:
+
+| Update | Rows | HOT |
+|---|---|---|
+| Claim (`state` 0 → 1) | 100 | **0** |
+| Heartbeat (`lease_expires_at`) | 100 | **0** |
+| Control (`last_error`, unindexed) | 100 | 51 |
+
+What the reserve still buys is locality: the new version does not extend the relation, and vacuum
+reclaims the old one from the same page. If index churn from heartbeats ever shows up in a profile, the
+lever is the *index*, not the fillfactor — dropping `lease_expires_at` from `ix_messages_lease`'s key
+would make the heartbeat HOT-eligible, at the cost of the recovery sweep's ordered scan.
+
+### Tables the tuning does not cover
+
+Only `messages` is tuned. `completed` and `dead_letters` are insert-then-bulk-delete tables: retention
+pruning removes a whole window at once, leaving a large batch of dead tuples for stock autovacuum to
+find. If you keep long retentions on a busy queue, consider the same treatment for them. Large payloads
+also land in the table's TOAST relation, which has its own autovacuum settings
+(`ALTER TABLE … SET (toast.autovacuum_vacuum_scale_factor = …)`).
+
+`ModelBuilder.AddJunctionModel()` does not carry any of this — EF has no model concept for storage
+parameters. Add `QueueSchema.TuningScript(...)` to your migration by hand with `migrationBuilder.Sql(...)`.
+
+## The bulk append path
+
+Above `StreamOptions.BulkInsertThreshold` (100 by default) an append streams its rows in with binary
+`COPY` instead of an INSERT per row, which skips the per-row parse/plan/tuple-build work. Below it, the
+EF insert wins on fixed cost. Both write the same rows, both run inside the transaction holding the
+offset reservation, and both let the sequence assign `id` — only `seq` is fixed in advance, because the
+reservation already decided it.
+
+Set the threshold to `0` to always use the EF path, or `1` to always use `COPY`.
+
+Both modules do this against `NpgsqlBinaryImporter` directly — `StreamBulkCopy` for Stream,
+`QueueCommands.CopyEnqueueAsync` for Queue. Each is one statement over a handful of columns whose shape
+this library owns, so a bulk-insert package dependency would buy little and cost a dependency the
+package has to carry, version and keep current. Junction's only dependencies are EF Core, Npgsql and
+the `Microsoft.Extensions.*` abstractions.
+
 ## Push delivery (LISTEN/NOTIFY)
 
 Both modules support push delivery: idle workers/consumers wait on a PostgreSQL `NOTIFY` instead of
@@ -41,6 +147,38 @@ exactly the same way regardless of whether a `NOTIFY` or the poll interval is wh
 
 Enable it with `QueueOptions.EnableNotifications` / `StreamOptions.EnablePushDelivery` (the latter is
 on by default).
+
+## Committing with your own writes
+
+Both modules can commit their own bookkeeping inside the transaction your code is already using, which
+is what turns at-least-once *delivery* into effectively-once *processing*. It needs the EF connector
+(`AddQueue<TContext>` / `AddStream<TContext>`): the connection-string registrations have no caller
+connection to join, so there the options below are inert rather than an error.
+
+| Direction | Option | What becomes atomic |
+|---|---|---|
+| Queue, producing | — (always) | An enqueue and your own writes |
+| Queue, consuming | `QueueWorkerOptions.TransactionalCompletion` (default `true`) | The handler's writes and the message's acknowledgement |
+| Stream, producing | — (always) | An append and your own writes |
+| Stream, consuming | `ConsumerHostOptions.TransactionalCommit` (default `true`) | The consumer's writes and the cursor advance past the event |
+
+The condition is the same in every row and easy to miss: **the handler has to write through the
+`DbContext` of the scope it was resolved from.** That is the context the transaction was opened on. A
+handler that opens its own context, or reaches a different database, is outside the transaction and
+back to at-least-once — which is the honest default for a side effect the database does not own.
+
+For the consuming rows this also means the retry is a real rollback: a consumer that throws after
+writing leaves neither its rows nor the cursor moved, so the event comes back and is handled again
+from a clean slate. The in-memory cursor is only advanced once the commit returns, so a rollback can
+never leave a consumer believing it passed events it never handled.
+
+Turn the consuming options **off** when the work is not in this database — sending mail, calling an
+API. A transaction cannot protect a side effect it does not own, and holding one open across a network
+call is the long-transaction pattern that hurts every table it touches.
+
+Group commit is the one case where the guarantee silently does not apply: those appends are written by
+a background flusher with no caller in the picture, so they cannot join a transaction. See
+`StreamOptions.EnableGroupCommit`.
 
 ## Typed handlers and naming conventions
 
@@ -200,8 +338,8 @@ services.AddJunction<AppDbContext>(o =>
 
 ## Verifying a build
 
-Requires `clemkd/BulkForge` checked out as a sibling of this repo (`../BulkForge`) — see the
-`ProjectReference` comment in `src/Junction/Junction.csproj`.
+No external checkout or private feed is needed — `dotnet restore` resolves everything from
+nuget.org.
 
 ```bash
 dotnet build

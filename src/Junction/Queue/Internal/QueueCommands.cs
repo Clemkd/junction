@@ -481,6 +481,19 @@ internal static class QueueCommands
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>
+    /// The server's <c>server_version_num</c> (130000 for 13.0, 180000 for 18.0). Read through
+    /// <c>current_setting</c> rather than <c>NpgsqlConnection.PostgreSqlVersion</c> so it also works on
+    /// a borrowed connection that is not Npgsql, and so the value is the server's own rather than one
+    /// the driver parsed.
+    /// </summary>
+    public static async Task<int> ServerVersionAsync(JunctionConnection connection, CancellationToken ct)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT current_setting('server_version_num')::int";
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+    }
+
     public static async Task ExecuteScriptAsync(
         JunctionConnection connection, string script, CancellationToken ct)
     {

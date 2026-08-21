@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using BulkForge;
 using Junction.Stream.Internal;
 using Junction.Stream.Model;
 using Microsoft.EntityFrameworkCore;
@@ -75,16 +74,15 @@ internal sealed class EventProducer(
             });
         }
 
-        // Large batches take the BulkForge binary-COPY path; smaller ones stay on EF (lower fixed
-        // cost). Both share this transaction (which holds the reservation), so the events and the
-        // offset counter commit atomically. BulkForge omits the identity `id` column and reuses
-        // the ambient transaction.
+        // Large batches take the binary-COPY path; smaller ones stay on EF (lower fixed cost). Both
+        // run on this transaction — the one holding the offset reservation — so the events and the
+        // counter commit atomically either way.
         int threshold = options.BulkInsertThreshold;
-        if (threshold > 0 && events.Count >= threshold)
-        {
-            await ctx.Records.BulkInsertAsync(entities, cancellationToken: ct);
-        }
-        else
+        bool bulk = threshold > 0 && events.Count >= threshold;
+
+        // TryWriteAsync declines when the connection is not Npgsql, which is also the fallback for a
+        // batch below the threshold: the EF insert writes exactly the same rows either way.
+        if (!bulk || !await StreamBulkCopy.TryWriteAsync(ctx, entities, ct))
         {
             ctx.Records.AddRange(entities);
             await ctx.SaveChangesAsync(ct);

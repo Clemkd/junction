@@ -29,7 +29,16 @@ infrastructure, that's the trade Junction makes.
   priorities, delays.
 - **Stream** — fan-out. Every consumer sees every event, each with its own durable, replayable cursor.
   At-least-once delivery, crash recovery, push delivery via `LISTEN`/`NOTIFY`, dead letters for hosted
-  consumers.
+  consumers, and a cursor that commits inside your own transaction.
+
+## Requirements
+
+- **PostgreSQL 13 or later**, vanilla — no extensions. 13 is the floor because that is the release
+  that made `gen_random_uuid()` a core function; everything else Junction runs has been available for
+  longer. On **18 or later** lease tokens are `uuidv7()` instead, so an in-flight row carries the
+  instant it was claimed. The dialect is picked from the server on first use, never from a build
+  flag. CI runs the whole suite against both 13 and 18.
+- **.NET 10**.
 
 ## Install
 
@@ -79,7 +88,7 @@ public sealed class BillingConsumer : StreamConsumer<OrderPlaced>
     public override Task ConsumeAsync(OrderPlaced e, CancellationToken ct)
     {
         // ... react to the event ...
-        return Task.CompletedTask; // commits the cursor; throwing redelivers this event
+        return Task.CompletedTask; // commits the cursor; throwing rolls back and redelivers
     }
 }
 

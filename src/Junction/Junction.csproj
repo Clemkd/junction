@@ -24,16 +24,4 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
-  <!--
-    High-throughput bulk append path (Npgsql binary COPY) for the Stream module, provided by
-    BulkForge (clemkd/BulkForge). Referenced as a sibling repo checkout — CI clones it to that path
-    (see .github/workflows/ci.yml) before building; a local build needs the same layout, i.e. BulkForge
-    checked out next to this repo (../BulkForge relative to this repo's own root). Publish BulkForge to
-    a NuGet feed and switch these to <PackageReference> if that becomes preferable to the sibling checkout.
-  -->
-  <ItemGroup>
-    <ProjectReference Include="..\..\..\BulkForge\src\BulkForge\BulkForge.csproj" />
-    <ProjectReference Include="..\..\..\BulkForge\src\BulkForge.PostgreSql\BulkForge.PostgreSql.csproj" />
-  </ItemGroup>
-
 </Project>
