@@ -58,6 +58,13 @@ public sealed class MixedRegistrationTests(PostgresFixture fixture)
         string stream = PostgresFixture.NewName("mix");
         long id = DateTime.UtcNow.Ticks;
 
+        await using (var initScope = sp.CreateAsyncScope())
+        {
+            // Queue's schema is only created by InitializeAsync — unlike this test's Stream fixture,
+            // nothing else has created junction.queues yet, so it must run before the transaction below.
+            await initScope.ServiceProvider.GetRequiredService<IQueueClient>().InitializeAsync();
+        }
+
         await using (var scope = sp.CreateAsyncScope())
         {
             var context = scope.ServiceProvider.GetRequiredService<TestDbContext>();
