@@ -25,8 +25,9 @@ public sealed class PostgresFixture : IAsyncLifetime
         ConnectionString = _container.GetConnectionString();
 
         // The business table stands in for "the caller's own schema": it is what the transactional
-        // tests write to, and it must be created without EF's EnsureCreated (which would refuse once
-        // the stream tables exist).
+        // tests write to, and it must be created via raw SQL, not EF's EnsureCreated — EnsureCreated
+        // decides whether to run at all by checking whether the database has any tables, so calling
+        // it here would silently do nothing once the stream tables exist.
         await using var connection = new NpgsqlConnection(ConnectionString);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
@@ -39,7 +40,7 @@ public sealed class PostgresFixture : IAsyncLifetime
             """;
         await command.ExecuteNonQueryAsync();
 
-        // Create the schema once up front so individual tests don't race on EnsureCreated.
+        // Create the schema once up front so individual tests don't race on schema creation.
         await using var provider = BuildProvider();
         await provider.GetRequiredService<IStreamClient>().InitializeAsync();
     }

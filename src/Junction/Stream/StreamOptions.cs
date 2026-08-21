@@ -4,9 +4,9 @@ namespace Junction.Stream;
 public sealed class StreamOptions
 {
     /// <summary>
-    /// When <c>true</c> (default), the schema is created automatically on first use via
-    /// <c>EnsureCreated</c>. Set to <c>false</c> and manage the schema with EF migrations
-    /// in production scenarios.
+    /// When <c>true</c> (default), the schema, tables and indexes are created automatically on first
+    /// use (see <see cref="StreamSchema.CreateScript"/>). Set to <c>false</c> and manage the schema
+    /// with EF migrations in production scenarios.
     /// </summary>
     public bool AutoCreateSchema { get; set; } = true;
 

@@ -22,21 +22,21 @@ public sealed class MetricsTests(PostgresFixture fixture)
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
 
-    private const string Enqueued = "junction.messages.enqueued";
-    private const string Deduplicated = "junction.messages.deduplicated";
-    private const string Claimed = "junction.messages.claimed";
-    private const string Acknowledged = "junction.messages.acknowledged";
-    private const string Retried = "junction.messages.retried";
-    private const string DeadLettered = "junction.messages.dead_lettered";
-    private const string Abandoned = "junction.messages.abandoned";
-    private const string LeasesLost = "junction.leases.lost";
-    private const string LeasesRecovered = "junction.leases.recovered";
-    private const string ClaimDuration = "junction.claim.duration";
-    private const string ProcessDuration = "junction.process.duration";
+    private const string Enqueued = "junction.queue.messages.enqueued";
+    private const string Deduplicated = "junction.queue.messages.deduplicated";
+    private const string Claimed = "junction.queue.messages.claimed";
+    private const string Acknowledged = "junction.queue.messages.acknowledged";
+    private const string Retried = "junction.queue.messages.retried";
+    private const string DeadLettered = "junction.queue.messages.dead_lettered";
+    private const string Abandoned = "junction.queue.messages.abandoned";
+    private const string LeasesLost = "junction.queue.leases.lost";
+    private const string LeasesRecovered = "junction.queue.leases.recovered";
+    private const string ClaimDuration = "junction.queue.claim.duration";
+    private const string ProcessDuration = "junction.queue.process.duration";
     private const string Depth = "junction.queue.messages";
     private const string OldestReady = "junction.queue.oldest_ready.age";
-    private const string StorageBytes = "junction.storage.bytes";
-    private const string DeadTuples = "junction.storage.dead_tuples";
+    private const string StorageBytes = "junction.queue.storage.bytes";
+    private const string DeadTuples = "junction.queue.storage.dead_tuples";
 
     // ---- harness ----
 

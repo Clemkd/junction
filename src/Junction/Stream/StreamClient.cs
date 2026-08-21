@@ -24,14 +24,16 @@ internal sealed class StreamClient(
         if (_initialized || !options.AutoCreateSchema)
             return;
 
-        // Guard against concurrent EnsureCreated calls from multiple hosted consumers.
+        // Guard against concurrent schema-creation calls from multiple hosted consumers.
         await _initGate.WaitAsync(ct);
         try
         {
             if (_initialized)
                 return;
             await using var ctx = await factory.CreateDbContextAsync(ct);
-            await ctx.Database.EnsureCreatedAsync(ct);
+            await using var cmd = await CreateCommandAsync(ctx, ct);
+            cmd.CommandText = StreamSchema.CreateScript();
+            await cmd.ExecuteNonQueryAsync(ct);
             _initialized = true;
         }
         finally

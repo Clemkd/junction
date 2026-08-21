@@ -189,7 +189,7 @@ services.AddJunction<AppDbContext>(o =>
 
 | Name | Description | Default |
 |---|---|---|
-| `AutoCreateSchema` | Create the schema via `EnsureCreated` on first use if missing. | `true` |
+| `AutoCreateSchema` | Create the schema, tables and indexes on first use if missing. | `true` |
 | `EnableSensitiveDataLogging` | Enable EF Core sensitive data logging (payloads/parameters). Dev only. | `false` |
 | `BulkInsertThreshold` | Batch size at/above which appends switch to a bulk-insert path for higher throughput. | `100` |
 | `EnablePushDelivery` | Wake idle consumers via `LISTEN`/`NOTIFY` instead of polling only. | `true` |
