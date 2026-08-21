@@ -14,10 +14,10 @@ Database benchmarks are I/O-bound, so timings are noisier than CPU micro-benchma
 entirely on your Postgres, disk and host — treat every number below as a relative signal, not a
 guarantee, and reproduce on your own hardware before sizing anything against it.
 
-> The tables in this document are carried over from Junction's source projects (`litequeue`,
-> `litestream`), measured before the merge into Junction. The engines were ported mechanically and are
-> functionally unchanged, but these numbers have not been re-run against the merged codebase in this
-> environment. Run the suites above to get numbers for your own hardware.
+> The tables in this document are carried over from an earlier version of this codebase, before the
+> Queue and Stream engines were brought together under Junction. The engines are functionally
+> unchanged, but these numbers have not been re-run against the current codebase in this environment.
+> Run the suites above to get numbers for your own hardware.
 
 ## Queue
 

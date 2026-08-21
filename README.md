@@ -1,5 +1,8 @@
 # Junction
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](src/Junction/Junction.csproj)
+
 **PostgreSQL-native messaging for .NET.** A competing-consumer work queue and a durable event stream,
 one coherent API, no broker to run — it's just tables in a database you already have.
 

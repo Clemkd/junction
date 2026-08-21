@@ -76,53 +76,53 @@ internal sealed class QueueMetrics : IDisposable
         _meter = new Meter(meterName);
 
         _enqueued = _meter.CreateCounter<long>(
-            "litequeue.messages.enqueued", "{message}", "Messages written to a queue.");
+            "junction.queue.messages.enqueued", "{message}", "Messages written to a queue.");
         _deduplicated = _meter.CreateCounter<long>(
-            "litequeue.messages.deduplicated", "{message}",
+            "junction.queue.messages.deduplicated", "{message}",
             "Enqueues dropped because a pending message already had the same dedup key.");
         _claimed = _meter.CreateCounter<long>(
-            "litequeue.messages.claimed", "{message}", "Messages leased to a worker.");
+            "junction.queue.messages.claimed", "{message}", "Messages leased to a worker.");
         _acknowledged = _meter.CreateCounter<long>(
-            "litequeue.messages.acknowledged", "{message}", "Messages completed successfully.");
+            "junction.queue.messages.acknowledged", "{message}", "Messages completed successfully.");
         _retried = _meter.CreateCounter<long>(
-            "litequeue.messages.retried", "{message}", "Failed messages sent back for another attempt.");
+            "junction.queue.messages.retried", "{message}", "Failed messages sent back for another attempt.");
         _deadLettered = _meter.CreateCounter<long>(
-            "litequeue.messages.dead_lettered", "{message}",
+            "junction.queue.messages.dead_lettered", "{message}",
             "Messages moved to the dead-letter table: attempts exhausted, or rejected as poison.");
         _abandoned = _meter.CreateCounter<long>(
-            "litequeue.messages.abandoned", "{message}",
+            "junction.queue.messages.abandoned", "{message}",
             "Messages handed back without spending an attempt.");
         _leasesLost = _meter.CreateCounter<long>(
-            "litequeue.leases.lost", "{lease}",
+            "junction.queue.leases.lost", "{lease}",
             "Fenced operations that matched nothing: the lease had expired and been reclaimed elsewhere.");
         _leasesRecovered = _meter.CreateCounter<long>(
-            "litequeue.leases.recovered", "{lease}",
+            "junction.queue.leases.recovered", "{lease}",
             "Expired leases returned to the queue, by a claim or by the maintenance sweep.");
 
         _claimDuration = _meter.CreateHistogram(
-            "litequeue.claim.duration", "s", "Time to claim, split by whether anything was claimed.",
+            "junction.queue.claim.duration", "s", "Time to claim, split by whether anything was claimed.",
             advice: new InstrumentAdvice<double> { HistogramBucketBoundaries = claimBuckets });
         _processDuration = _meter.CreateHistogram(
-            "litequeue.process.duration", "s", "Time to handle and complete one unit of work.",
+            "junction.queue.process.duration", "s", "Time to handle and complete one unit of work.",
             advice: new InstrumentAdvice<double> { HistogramBucketBoundaries = processBuckets });
 
         _depth = _meter.CreateObservableGauge(
-            "litequeue.queue.messages", ObserveDepth, "{message}",
+            "junction.queue.messages", ObserveDepth, "{message}",
             "Messages in the hot table, by state.");
         _expired = _meter.CreateObservableGauge(
-            "litequeue.queue.expired_leases", ObserveExpired, "{message}",
+            "junction.queue.expired_leases", ObserveExpired, "{message}",
             "In-flight messages whose lease has run out: their worker stopped reporting.");
         _oldestReady = _meter.CreateObservableGauge(
-            "litequeue.queue.oldest_ready.age", ObserveOldestReady, "s",
+            "junction.queue.oldest_ready.age", ObserveOldestReady, "s",
             "How long the oldest claimable message has been waiting — the queue's latency signal.");
         _deadLetters = _meter.CreateObservableGauge(
-            "litequeue.queue.dead_letters", ObserveDeadLetters, "{message}",
+            "junction.queue.dead_letters", ObserveDeadLetters, "{message}",
             "Dead-lettered messages currently retained.");
         _storageBytes = _meter.CreateObservableGauge(
-            "litequeue.storage.bytes", ObserveStorageBytes, "By",
+            "junction.queue.storage.bytes", ObserveStorageBytes, "By",
             "Size of the hot table, heap and indexes.");
         _deadTuples = _meter.CreateObservableGauge(
-            "litequeue.storage.dead_tuples", ObserveDeadTuples, "{row}",
+            "junction.queue.storage.dead_tuples", ObserveDeadTuples, "{row}",
             "Dead tuples in the hot table that autovacuum has not reclaimed yet.");
     }
 

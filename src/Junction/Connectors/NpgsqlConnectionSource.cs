@@ -4,9 +4,9 @@ namespace Junction.Connectors;
 
 /// <summary>
 /// Connector for callers with no EF Core context in the picture: rents a connection from an
-/// <see cref="NpgsqlDataSource"/> per operation. Use this when LiteQueue is the only thing talking to
-/// the database in that code path; prefer <see cref="EfCoreConnectionSource"/> when you want the
-/// completion to ride along with your business transaction.
+/// <see cref="NpgsqlDataSource"/> per operation. Use this when the Queue module is the only thing
+/// talking to the database in that code path; prefer <see cref="EfCoreConnectionSource"/> when you want
+/// the completion to ride along with your business transaction.
 /// </summary>
 public sealed class NpgsqlConnectionSource(NpgsqlDataSource dataSource) : IJunctionConnectionSource
 {
