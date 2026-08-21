@@ -28,7 +28,8 @@ infrastructure, that's the trade Junction makes.
   `FOR UPDATE SKIP LOCKED` claims, fenced leases with heartbeats, retries with backoff, dead letters,
   priorities, delays.
 - **Stream** — fan-out. Every consumer sees every event, each with its own durable, replayable cursor.
-  At-least-once delivery, crash recovery, push delivery via `LISTEN`/`NOTIFY`.
+  At-least-once delivery, crash recovery, push delivery via `LISTEN`/`NOTIFY`, dead letters for hosted
+  consumers.
 
 ## Install
 

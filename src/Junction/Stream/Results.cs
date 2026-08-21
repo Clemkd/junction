@@ -32,3 +32,20 @@ public sealed record ConsumerLag(string Stream, string Consumer, long Position, 
     /// <summary>Number of events not yet consumed.</summary>
     public long Lag => Math.Max(0, EndOffset - Position);
 }
+
+/// <summary>An event a hosted consumer could not process after exhausting its attempts.</summary>
+public sealed record StreamDeadLetter
+{
+    public required long Id { get; init; }
+    public required string Stream { get; init; }
+    public required string Consumer { get; init; }
+    /// <summary>Offset the event had in the stream.</summary>
+    public required long Offset { get; init; }
+    public string? Key { get; init; }
+    public required string Type { get; init; }
+    public required ReadOnlyMemory<byte> Payload { get; init; }
+    public IReadOnlyDictionary<string, string>? Headers { get; init; }
+    public required int Attempts { get; init; }
+    public required DateTime FailedAt { get; init; }
+    public string? Error { get; init; }
+}

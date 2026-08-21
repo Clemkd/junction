@@ -48,4 +48,14 @@ public interface IEventConsumer
     /// after each successfully handled batch, so the consumer only sees events.
     /// </summary>
     Task RunAsync(Func<EventBatch, CancellationToken, Task> handler, ConsumeOptions options, CancellationToken ct = default);
+
+    /// <summary>
+    /// Record events this consumer could not process, inspectable via
+    /// <see cref="IStreamClient.GetDeadLettersAsync"/>. Used by the hosted consumer
+    /// (<c>AddStreamConsumer</c>) once a batch keeps failing, so a poison event does not block this
+    /// consumer's cursor forever. Does not advance the cursor — call <see cref="CommitAsync"/> or
+    /// <see cref="CommitBatchAsync"/> afterwards to skip past the recorded events.
+    /// </summary>
+    Task DeadLetterAsync(
+        IReadOnlyList<EventRecord> records, int attempts, string? error, CancellationToken ct = default);
 }

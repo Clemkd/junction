@@ -107,6 +107,36 @@ internal sealed class StreamClient(
         };
     }
 
+    public async Task<IReadOnlyList<StreamDeadLetter>> GetDeadLettersAsync(
+        string stream, string? consumerName = null, int maxMessages = 100, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxMessages);
+        await using var ctx = await factory.CreateDbContextAsync(ct);
+        var id = await StreamOps.TryGetStreamIdAsync(ctx, stream, ct);
+        if (id is null)
+            return [];
+
+        var query = ctx.DeadLetters.Where(d => d.StreamId == id);
+        if (consumerName is not null)
+            query = query.Where(d => d.ConsumerName == consumerName);
+
+        var rows = await query.OrderByDescending(d => d.FailedAt).Take(maxMessages).ToListAsync(ct);
+        return rows.Select(d => new StreamDeadLetter
+        {
+            Id = d.Id,
+            Stream = stream,
+            Consumer = d.ConsumerName,
+            Offset = d.Sequence,
+            Key = d.EventKey,
+            Type = d.EventType,
+            Payload = d.Payload,
+            Headers = HeaderSerializer.Deserialize(d.Headers),
+            Attempts = d.Attempts,
+            FailedAt = d.FailedAt,
+            Error = d.Error,
+        }).ToList();
+    }
+
     public async Task<StorageStats> GetStorageStatsAsync(CancellationToken ct = default)
     {
         await using var ctx = await factory.CreateDbContextAsync(ct);

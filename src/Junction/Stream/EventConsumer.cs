@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Junction.Internal;
 using Junction.Stream.Internal;
+using Junction.Stream.Model;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 
@@ -195,6 +196,50 @@ internal sealed class EventConsumer : IEventConsumer
             _gate.Release();
         }
     }
+
+    public async Task DeadLetterAsync(
+        IReadOnlyList<EventRecord> records, int attempts, string? error, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        if (records.Count == 0)
+            return;
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            await using var ctx = await _factory.CreateDbContextAsync(ct);
+            await EnsureLoadedAsync(ctx, ct);
+
+            var now = DateTime.UtcNow;
+            var entities = new List<StreamDeadLetterEntity>(records.Count);
+            foreach (var r in records)
+            {
+                entities.Add(new StreamDeadLetterEntity
+                {
+                    StreamId = _streamId,
+                    ConsumerName = Name,
+                    Sequence = r.Offset,
+                    EventKey = r.Key,
+                    EventType = r.Type,
+                    Payload = r.Payload.ToArray(),
+                    Headers = HeaderSerializer.Serialize(r.Headers),
+                    Attempts = attempts,
+                    FailedAt = now,
+                    Error = Truncate(error),
+                });
+            }
+            ctx.DeadLetters.AddRange(entities);
+            await ctx.SaveChangesAsync(ct);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>Keep a stack trace from becoming the biggest column in the dead-letter table.</summary>
+    private static string? Truncate(string? error, int max = 4000) =>
+        error is null || error.Length <= max ? error : error[..max];
 
     private async Task EnsureLoadedAsync(JunctionDbContext ctx, CancellationToken ct)
     {

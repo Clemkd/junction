@@ -90,26 +90,97 @@ internal abstract class ConsumerHostBase<TConsumer>(
         logger.LogInformation("Junction consumer '{Consumer}' on stream '{Stream}' stopped.", name, stream);
     }
 
-    /// <summary>Handle each record in its own DI scope and commit after each (single-message semantics).</summary>
+    /// <summary>
+    /// Handle each record in its own DI scope and commit after each (single-message semantics). A
+    /// record that keeps failing is retried locally, up to <see cref="ConsumerHostOptions.MaxAttempts"/>
+    /// times, without blocking the records after it; once exhausted (or immediately, for a
+    /// <see cref="PoisonEventException"/>) it is dead-lettered and skipped.
+    /// </summary>
     protected async Task ForEachMessageAsync(EventBatch batch, IEventConsumer consumer,
         Func<IServiceProvider, EventRecord, CancellationToken, Task> handle, CancellationToken ct)
     {
         foreach (var record in batch.Records)
         {
             ct.ThrowIfCancellationRequested();
-            using var scope = Services.CreateScope();
-            await handle(scope.ServiceProvider, record, ct);
-            await consumer.CommitAsync(record.Offset, ct);
+
+            int attempts = 0;
+            while (true)
+            {
+                attempts++;
+                try
+                {
+                    using var scope = Services.CreateScope();
+                    await handle(scope.ServiceProvider, record, ct);
+                    await consumer.CommitAsync(record.Offset, ct);
+                    break;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    if (ex is PoisonEventException || attempts >= Options.MaxAttempts)
+                    {
+                        await consumer.DeadLetterAsync([record], attempts, ex.ToString(), CancellationToken.None);
+                        await consumer.CommitAsync(record.Offset, CancellationToken.None);
+                        logger.LogError(ex,
+                            "Event at offset {Offset} on stream '{Stream}' dead-lettered after {Attempts} attempt(s).",
+                            record.Offset, consumer.Stream, attempts);
+                        break;
+                    }
+
+                    logger.LogWarning(ex,
+                        "Event at offset {Offset} on stream '{Stream}' failed (attempt {Attempt}/{Max}); retrying after {Delay}.",
+                        record.Offset, consumer.Stream, attempts, Options.MaxAttempts, Options.ErrorRetryDelay);
+                    await Task.Delay(Options.ErrorRetryDelay, ct);
+                }
+            }
         }
     }
 
-    /// <summary>Handle the whole batch in one DI scope and commit once (batch semantics).</summary>
+    /// <summary>
+    /// Handle the whole batch in one DI scope and commit once (batch semantics). A batch that keeps
+    /// failing is retried locally, up to <see cref="ConsumerHostOptions.MaxAttempts"/> times; once
+    /// exhausted (or immediately, for a <see cref="PoisonEventException"/>) every record in it is
+    /// dead-lettered and skipped together.
+    /// </summary>
     protected async Task HandleBatchAsync(EventBatch batch, IEventConsumer consumer,
         Func<IServiceProvider, CancellationToken, Task> handle, CancellationToken ct)
     {
-        using var scope = Services.CreateScope();
-        await handle(scope.ServiceProvider, ct);
-        await consumer.CommitBatchAsync(batch, ct);
+        int attempts = 0;
+        while (true)
+        {
+            attempts++;
+            try
+            {
+                using var scope = Services.CreateScope();
+                await handle(scope.ServiceProvider, ct);
+                await consumer.CommitBatchAsync(batch, ct);
+                return;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                if (ex is PoisonEventException || attempts >= Options.MaxAttempts)
+                {
+                    await consumer.DeadLetterAsync(batch.Records, attempts, ex.ToString(), CancellationToken.None);
+                    await consumer.CommitBatchAsync(batch, CancellationToken.None);
+                    logger.LogError(ex,
+                        "Batch of {Count} event(s) starting at offset {Offset} on stream '{Stream}' dead-lettered after {Attempts} attempt(s).",
+                        batch.Count, batch.FromOffset, consumer.Stream, attempts);
+                    return;
+                }
+
+                logger.LogWarning(ex,
+                    "Batch of {Count} event(s) starting at offset {Offset} on stream '{Stream}' failed (attempt {Attempt}/{Max}); retrying after {Delay}.",
+                    batch.Count, batch.FromOffset, consumer.Stream, attempts, Options.MaxAttempts, Options.ErrorRetryDelay);
+                await Task.Delay(Options.ErrorRetryDelay, ct);
+            }
+        }
     }
 }
 
@@ -157,7 +228,7 @@ internal sealed class SingleTypedConsumerHost<TConsumer, TMessage>(
     protected override Task ProcessBatchAsync(EventBatch batch, IEventConsumer consumer, CancellationToken ct) =>
         ForEachMessageAsync(batch, consumer, (sp, record, c) =>
         {
-            var value = serializer.Value.Deserialize<TMessage>(record.Payload);
+            var value = TypedEventPayload.Deserialize<TMessage>(serializer.Value, record);
             return sp.GetRequiredService<TConsumer>().ConsumeAsync(value, c);
         }, ct);
 }
@@ -178,7 +249,27 @@ internal sealed class BatchTypedConsumerHost<TConsumer, TMessage>(
         {
             var entities = new List<TMessage>(batch.Records.Count);
             foreach (var record in batch.Records)
-                entities.Add(serializer.Value.Deserialize<TMessage>(record.Payload));
+                entities.Add(TypedEventPayload.Deserialize<TMessage>(serializer.Value, record));
             return sp.GetRequiredService<TConsumer>().ConsumeAsync(entities, c);
         }, ct);
+}
+
+internal static class TypedEventPayload
+{
+    /// <summary>
+    /// A payload that will not deserialize will not deserialize on the next attempt either, so it is
+    /// dead-lettered immediately rather than retried until its budget runs out.
+    /// </summary>
+    public static T Deserialize<T>(IPayloadSerializer serializer, EventRecord record)
+    {
+        try
+        {
+            return serializer.Deserialize<T>(record.Payload);
+        }
+        catch (Exception ex)
+        {
+            throw new PoisonEventException(
+                $"Event at offset {record.Offset} of type '{record.Type}' could not be deserialized as {typeof(T).Name}.", ex);
+        }
+    }
 }

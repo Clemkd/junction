@@ -17,6 +17,7 @@ public sealed class JunctionDbContext(DbContextOptions<JunctionDbContext> option
     public DbSet<StreamDefinition> Streams => Set<StreamDefinition>();
     public DbSet<StreamRecordEntity> Records => Set<StreamRecordEntity>();
     public DbSet<ConsumerCursor> Cursors => Set<ConsumerCursor>();
+    public DbSet<StreamDeadLetterEntity> DeadLetters => Set<StreamDeadLetterEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -65,6 +66,25 @@ public sealed class JunctionDbContext(DbContextOptions<JunctionDbContext> option
             e.HasIndex(x => new { x.StreamId, x.ConsumerName })
                 .IsUnique()
                 .HasDatabaseName("ux_cursor_stream_consumer");
+        });
+
+        modelBuilder.Entity<StreamDeadLetterEntity>(e =>
+        {
+            e.ToTable("stream_dead_letters");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id").UseIdentityByDefaultColumn();
+            e.Property(x => x.StreamId).HasColumnName("stream_id");
+            e.Property(x => x.ConsumerName).HasColumnName("consumer_name").IsRequired();
+            e.Property(x => x.Sequence).HasColumnName("seq");
+            e.Property(x => x.EventKey).HasColumnName("event_key");
+            e.Property(x => x.EventType).HasColumnName("event_type").IsRequired();
+            e.Property(x => x.Payload).HasColumnName("payload").HasColumnType("bytea");
+            e.Property(x => x.Headers).HasColumnName("headers").HasColumnType("jsonb");
+            e.Property(x => x.Attempts).HasColumnName("attempts");
+            e.Property(x => x.FailedAt).HasColumnName("failed_at").HasColumnType("timestamp with time zone");
+            e.Property(x => x.Error).HasColumnName("error");
+            e.HasIndex(x => new { x.StreamId, x.ConsumerName, x.FailedAt })
+                .HasDatabaseName("ix_dead_letters_stream_consumer");
         });
     }
 }

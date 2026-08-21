@@ -32,4 +32,12 @@ public interface IStreamClient
 
     /// <summary>Ensure the underlying schema exists (idempotent).</summary>
     Task InitializeAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Most recent dead letters — events a hosted consumer (<c>AddStreamConsumer</c>) could not
+    /// process after exhausting its attempts — newest first. Pass <paramref name="consumerName"/> to
+    /// scope the results to one consumer; omit it for every consumer of the stream.
+    /// </summary>
+    Task<IReadOnlyList<StreamDeadLetter>> GetDeadLettersAsync(
+        string stream, string? consumerName = null, int maxMessages = 100, CancellationToken ct = default);
 }

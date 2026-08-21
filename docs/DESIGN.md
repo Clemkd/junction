@@ -12,7 +12,8 @@ Junction is two engines behind one façade:
 Both modules share:
 
 - **One schema.** `junction` by default. Table names don't collide (`queues`, `messages`,
-  `dead_letters`, `completed` vs. `streams`, `stream_events`, `consumer_cursors`). Configurable for
+  `dead_letters`, `completed` vs. `streams`, `stream_events`, `consumer_cursors`,
+  `stream_dead_letters`). Configurable for
   Queue (`QueueOptions.Schema`); fixed for Stream (`JunctionDbContext.Schema`) — moving Queue's schema
   elsewhere puts the two modules' tables in different schemas.
 - **One connector abstraction.** `Junction.Connectors.IJunctionConnectionSource` is how a module gets
