@@ -24,28 +24,17 @@ namespace Junction.Tests.Queue;
 public sealed class CatalogRollbackTests(PostgresFixture fixture)
 {
     /// <summary>
-    /// <b>Known failure, not yet fixed — see the class remarks.</b> A queue is first mentioned inside a
-    /// transaction that then rolls back; the next enqueue lands under the cached phantom id, and a
-    /// different process resolving the same name from the database gets a fresh id and sees nothing.
+    /// The regression. A queue is first mentioned inside a transaction that then rolls back; the next
+    /// enqueue must still land somewhere a different process can claim it from.
     /// <para>
-    /// Skipped rather than deleted because the obvious fix does not work, and the reason is worth
-    /// keeping next to the test. Not caching the id inside a transaction makes every other connection
-    /// that mentions the queue run <c>EnsureQueue</c>, which is an upsert: it blocks on the
-    /// uncommitted queue row until the caller's transaction ends. Measured as four tests timing out in
-    /// Npgsql (<c>ConnectorTests</c>, <c>TransactionalTests</c>, <c>BulkEnqueueTests</c>) with the run
-    /// going from 45 s to 2 min 14 s. The cache was hiding that lock hazard, so removing it trades
-    /// silent message loss for a liveness bug.
-    /// </para>
-    /// <para>
-    /// The real fix is to create the queue row <i>outside</i> the caller's transaction, on a connection
-    /// the catalog opens itself: the row then commits immediately, so caching is sound and no other
-    /// connection is ever blocked. That needs a connection string the catalog can reach — the same one
-    /// <c>QueueListenerConnection</c> already resolves for the LISTEN socket — and a decision about
-    /// what to do when there is none (a caller-supplied bare <c>DbConnection</c>).
+    /// Fixed by creating the queue row on a connection of the catalog's own, so it commits regardless of
+    /// what the caller's transaction does. Not caching the id was tried first and is the wrong fix:
+    /// every other connection that mentions the queue then runs <c>EnsureQueue</c>, an upsert, which
+    /// blocks on the uncommitted row until the caller commits — four tests timed out in Npgsql and the
+    /// suite went from 45 s to 2 min 14 s.
     /// </para>
     /// </summary>
-    [Fact(Skip = "Queue ids created inside a transaction are cached before the transaction commits. " +
-                 "The fix needs out-of-band queue creation — see the remarks on this test.")]
+    [Fact]
     public async Task A_queue_first_created_in_a_rolled_back_transaction_is_still_usable()
     {
         string queue = PostgresFixture.NewQueue("rollback-catalog");

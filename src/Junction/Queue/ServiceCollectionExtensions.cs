@@ -195,6 +195,18 @@ public static class ServiceCollectionExtensions
         IPayloadSerializer? serializer,
         Func<IServiceProvider, string?> listenerConnectionString)
     {
+        // Options go in with AddSingleton (last wins) while the connector uses TryAddScoped (first
+        // wins), so a second registration silently pairs the second call's options with the first
+        // call's connector. That is never intended -- it is what AddJunction next to a hand-written
+        // AddQueue produces -- and the result is a module configured half one way and half the other,
+        // with nothing to show for it. Refuse it instead.
+        if (services.Any(d => d.ServiceType == typeof(QueueOptions)))
+            throw new InvalidOperationException(
+                "The Queue module is already registered. AddQueue/AddQueue<TContext> (and AddJunction, " +
+                "which calls them) must be called once per container: a second call would keep the " +
+                "first call's connector while replacing its options. Configure everything in the one " +
+                "call instead.");
+
         var options = new QueueOptions();
         configure?.Invoke(options);
 
@@ -203,7 +215,13 @@ public static class ServiceCollectionExtensions
         // process-wide meter, which must stay out of the container — a container that owned it would
         // dispose it on teardown and silently kill every instrument for the rest of the process.
         services.AddSingleton(sp => new QueueCatalog(
-            sp.GetRequiredService<QueueOptions>(), sp.GetService<QueueMetrics>()));
+            sp.GetRequiredService<QueueOptions>(),
+            sp.GetService<QueueMetrics>(),
+            // Lets the catalog create a queue row without borrowing the caller's transaction — see the
+            // remarks on QueueCatalog. Reuses the connection string the LISTEN socket already resolves,
+            // and yields null when there is none (a caller-supplied bare DbConnection), which the
+            // catalog treats as "fall back to the caller's connection".
+            ct => OpenOutOfBandAsync(sp, ct)));
         services.TryAddSingleton(new QueuePayloadSerializer(serializer ?? new JsonPayloadSerializer()));
         services.TryAddScoped<IQueueClient>(sp => new QueueClient(
             sp.GetRequiredService<QueueCatalog>(),
@@ -222,6 +240,30 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IQueueWakeup, PollingWakeup>();
 
         return services;
+    }
+
+    /// <summary>
+    /// A short-lived connection of the library's own, for the handful of statements that must not run
+    /// inside the caller's transaction. Prefers the registered <see cref="NpgsqlDataSource"/> when there
+    /// is one (<c>AddQueue(connectionString)</c>), otherwise reopens from the connection string behind
+    /// the caller's <c>DbContext</c>. Returns <c>null</c> when neither is available.
+    /// </summary>
+    private static async ValueTask<JunctionConnection?> OpenOutOfBandAsync(
+        IServiceProvider services, CancellationToken cancellationToken)
+    {
+        if (services.GetService<NpgsqlDataSource>() is { } dataSource)
+        {
+            var pooled = await dataSource.OpenConnectionAsync(cancellationToken);
+            return new JunctionConnection(pooled, transaction: null, pooled.DisposeAsync);
+        }
+
+        string? connectionString = services.GetRequiredService<QueueListenerConnection>().Resolve(services);
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return null;
+
+        var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        return new JunctionConnection(connection, transaction: null, connection.DisposeAsync);
     }
 
     private sealed class MaintenanceMarker;
