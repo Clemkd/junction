@@ -30,7 +30,7 @@ public sealed class DataIntegrityTests(PostgresFixture fixture)
 
         var record = (await client.GetConsumer(stream, "r").PollAsync(1)).Records[0];
         Assert.Equal("k", record.Key);
-        Assert.Equal(payload, record.Payload);
+        Assert.Equal(payload, record.Payload.ToArray());
     }
 
     [Theory]
@@ -49,7 +49,7 @@ public sealed class DataIntegrityTests(PostgresFixture fixture)
 
         var record = (await client.GetConsumer(stream, "r").PollAsync(1)).Records[0];
         Assert.Equal(payload.Length, record.Payload.Length);
-        Assert.Equal(payload, record.Payload);
+        Assert.Equal(payload, record.Payload.ToArray());
     }
 
     [Fact]

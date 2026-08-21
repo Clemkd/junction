@@ -99,7 +99,7 @@ public sealed class VolumeTests(PostgresFixture fixture)
         await client.Producer.AppendAsync(stream, EventData.FromBytes("T", Array.Empty<byte>()));
 
         var record = (await client.GetConsumer(stream, "r").PollAsync(1)).Records[0];
-        Assert.Empty(record.Payload);
+        Assert.Equal(0, record.Payload.Length);
         Assert.Equal("", record.AsText());
     }
 
@@ -214,7 +214,7 @@ public sealed class VolumeTests(PostgresFixture fixture)
         var records = await TestHelpers.DrainAsync(client.GetConsumer(stream, "r"), batch: 5);
         Assert.Equal(count, records.Count);
         for (int i = 0; i < count; i++)
-            Assert.True(payloads[i].AsSpan().SequenceEqual(records[i].Payload), $"payload {i} differs");
+            Assert.True(payloads[i].AsSpan().SequenceEqual(records[i].Payload.Span), $"payload {i} differs");
 
         var stats = await client.GetStreamStatsAsync(stream);
         Assert.Equal((long)count * size, stats.PayloadBytes);
