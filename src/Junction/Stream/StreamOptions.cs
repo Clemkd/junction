@@ -45,6 +45,17 @@ public sealed class StreamOptions
     /// transaction + one fsync, hugely increasing throughput for that workload at the cost of a
     /// small batching latency. Batch <c>AppendAsync(list)</c> calls bypass it (already amortized).
     /// Default: false.
+    /// <para>
+    /// <b>This is the one option that withdraws the shared-transaction guarantee.</b> The flusher
+    /// writes on its own connection with no caller in the picture, so a grouped append cannot join your
+    /// transaction — and that holds even under <c>AddStream&lt;TContext&gt;</c>, where group commit takes
+    /// precedence over the connector. If an append has to commit with your own writes, leave this off.
+    /// </para>
+    /// <para>
+    /// Two further consequences: an <c>AppendAsync</c> cancelled after its request is queued throws
+    /// without un-appending the event, and a single append pays the
+    /// <see cref="GroupCommitLinger"/> window.
+    /// </para>
     /// </summary>
     public bool EnableGroupCommit { get; set; }
 
