@@ -418,12 +418,18 @@ internal sealed class QueueSql
              """;
 
         // Recovery pass 2: the worker died mid-flight — hand the message back to the queue.
+        //
+        // The attempts guard is not redundant with pass 1. Both passes are bounded by the same @max,
+        // so a burst of more than @max leases expiring on their final attempt leaves a remainder pass 1
+        // could not reach; without this filter pass 2 would revive exactly those, granting an attempt
+        // beyond max_attempts and making the public IsLastAttempt contract false. The remainder is
+        // simply buried on the next sweep instead.
         RecoverExpired =
             $"""
              WITH expired AS (
                  SELECT id
                  FROM {schema}.messages
-                 WHERE state = 1 AND lease_expires_at < now()
+                 WHERE state = 1 AND lease_expires_at < now() AND attempts < max_attempts
                    AND (@queue::int IS NULL OR queue_id = @queue)
                  ORDER BY lease_expires_at
                  FOR UPDATE SKIP LOCKED
