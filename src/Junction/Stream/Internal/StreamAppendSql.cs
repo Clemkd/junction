@@ -1,6 +1,8 @@
 using System.Data;
 using System.Data.Common;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Junction.Stream.Internal;
 
