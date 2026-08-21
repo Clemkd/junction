@@ -2,6 +2,9 @@
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/Junction.Benchmarks/Junction.Benchmarks.csproj" />
   </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Junction.Console/Junction.Console.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Junction/Junction.csproj" />
   </Folder>

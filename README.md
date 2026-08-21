@@ -92,6 +92,9 @@ the same shared-transaction guarantee. Each also has a connection-string-only ov
 (`AddQueue`/`AddStream`) for processes with no EF Core context in the picture — that one runs on its
 own connection and can't join a transaction you opened elsewhere.
 
+A runnable example — a small marketplace using both modules together — lives in
+[`samples/Junction.Console`](samples/Junction.Console).
+
 ## Performance
 
 Both modules ship a [BenchmarkDotNet](https://benchmarkdotnet.org) suite

@@ -196,7 +196,7 @@ services.AddJunction<AppDbContext>(o =>
 
 ## Not included
 
-- Samples (`samples/`) and .NET Aspire orchestration (`aspire/`).
+- .NET Aspire orchestration (`aspire/`).
 
 ## Verifying a build
 
