@@ -31,6 +31,52 @@ flowchart LR
 Each Queue message goes to exactly one worker, whichever claims it first; each Stream event goes to
 every consumer, independently, at its own pace.
 
+### Queue: claim order
+
+Ready messages are claimed in priority-then-FIFO order, one at a time per claim, via
+`FOR UPDATE SKIP LOCKED` — whichever worker's claim statement runs next gets the next message, so the
+claim order below is global across every worker, not per-worker:
+
+```mermaid
+flowchart LR
+    subgraph Q["Queue — ready, in enqueue order"]
+        direction TB
+        m1["msg 1"]
+        m2["msg 2"]
+        m3["msg 3"]
+        m4["msg 4"]
+        m5["msg 5"]
+    end
+    m1 -->|"claim #1"| A[Worker A]
+    m2 -->|"claim #2"| B[Worker B]
+    m3 -->|"claim #3"| A
+    m4 -->|"claim #4"| B
+    m5 -->|"claim #5"| A
+```
+
+Worker A claims #1, is still busy with it when #2 becomes claimable, so Worker B takes #2; whichever
+worker finishes first claims the next one. `SKIP LOCKED` guarantees the same message is never handed
+to two workers, regardless of how many claim concurrently.
+
+### Stream: one cursor per consumer
+
+The log itself never changes because of a consumer reading it — only that consumer's own cursor moves:
+
+```mermaid
+flowchart LR
+    subgraph S["Stream — append-only log"]
+        direction LR
+        e0(("0")) --> e1(("1")) --> e2(("2")) --> e3(("3")) --> e4(("4")) --> e5(("5")) --> next(("…"))
+    end
+    e0 -.->|cursor| Notifications["Consumer: Notifications<br/>next read: offset 1"]
+    e2 -.->|cursor| Billing["Consumer: Billing<br/>next read: offset 3"]
+    e4 -.->|cursor| Analytics["Consumer: Analytics<br/>next read: offset 5"]
+```
+
+Three consumers, three independent cursors, one shared log: `Notifications` is nearly caught up,
+`Billing` is a few events behind, `Analytics` further still — none of them affect each other or the
+log, and a consumer can `SeekAsync` its own cursor back to replay events the others already passed.
+
 Both modules share:
 
 - **One schema.** `junction` by default. Table names don't collide (`queues`, `messages`,
