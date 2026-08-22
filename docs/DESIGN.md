@@ -7,29 +7,34 @@ Junction is two engines behind one façade.
 ### `Junction.Queue` — competing consumers (fan-in)
 
 `FOR UPDATE SKIP LOCKED` claims, fenced lease tokens, and a partial index on the hot table ensure
-exactly one worker ever holds a given message. Ready messages are claimed in priority-then-FIFO
-order, one at a time per claim — the claim order below is global across every worker, not per-worker:
+exactly one worker ever holds a given message. Any number of producers enqueue concurrently; ready
+messages are claimed in priority-then-FIFO order, one at a time per claim — the claim order below is
+global across every worker, not per-worker. There is no dispatcher or broker process in between:
+each worker claims directly from the table.
 
 ```mermaid
 flowchart LR
+    P1[Producer 1] --> Q
+    P2[Producer 2] --> Q
+    P3[Producer 3] --> Q
+
     subgraph Q["Queue — ready, in enqueue order"]
-        direction TB
-        m1["msg 1"]
-        m2["msg 2"]
-        m3["msg 3"]
-        m4["msg 4"]
-        m5["msg 5"]
+        direction LR
+        m1[M1] --> m2[M2] --> m3[M3] --> m4[M4] --> m5[M5] --> m6[M6]
     end
-    m1 -->|"claim #1<br/>A is free"| A[Worker A]
-    m2 -->|"claim #2<br/>A busy, B claims"| B[Worker B]
-    m3 -->|"claim #3<br/>A free again"| A
-    m4 -->|"claim #4<br/>B free again"| B
-    m5 -->|"claim #5<br/>A free again"| A
+
+    m1 -->|"claim #1<br/>SKIP LOCKED"| W1[Worker 1]
+    m2 -->|"claim #2<br/>SKIP LOCKED"| W2[Worker 2]
+    m3 -->|"claim #3<br/>SKIP LOCKED"| W3[Worker 3]
+    m4 -->|"claim #4<br/>W1 free again"| W1
+    m5 -->|"claim #5<br/>W2 free again"| W2
+    m6 -->|"claim #6<br/>W3 free again"| W3
 ```
 
-Worker A claims #1, is still busy with it when #2 becomes claimable, so Worker B takes #2; whichever
-worker finishes first claims the next one. `SKIP LOCKED` guarantees the same message is never handed
-to two workers, regardless of how many claim concurrently.
+Workers 1–3 each claim one message as soon as they're free; whichever worker's claim statement runs
+next gets the next message, so the six claims interleave across all three rather than following any
+one worker's own order. `SKIP LOCKED` guarantees the same message is never handed to two workers,
+regardless of how many claim concurrently.
 
 ### `Junction.Stream` — fan-out
 
