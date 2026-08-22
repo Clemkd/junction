@@ -12,19 +12,12 @@ order, one at a time per claim — the claim order below is global across every 
 
 ```mermaid
 flowchart LR
-    subgraph Q["Queue — ready, in enqueue order"]
-        direction TB
-        m1["msg 1"]
-        m2["msg 2"]
-        m3["msg 3"]
-        m4["msg 4"]
-        m5["msg 5"]
-    end
-    m1 -->|"claim #1"| A[Worker A]
-    m2 -->|"claim #2"| B[Worker B]
-    m3 -->|"claim #3"| A
-    m4 -->|"claim #4"| B
-    m5 -->|"claim #5"| A
+    m1["msg 1"] -->|"claim #1<br/>A is free"| A[Worker A]
+    m2["msg 2"] -->|"claim #2<br/>A busy, B claims"| B[Worker B]
+    m3["msg 3"] -->|"claim #3<br/>A free again"| A
+    m4["msg 4"] -->|"claim #4<br/>B free again"| B
+    m5["msg 5"] -->|"claim #5<br/>A free again"| A
+    m1 ~~~ m2 ~~~ m3 ~~~ m4 ~~~ m5
 ```
 
 Worker A claims #1, is still busy with it when #2 becomes claimable, so Worker B takes #2; whichever
@@ -39,18 +32,15 @@ only that consumer's own cursor moves:
 
 ```mermaid
 flowchart LR
-    subgraph S["Stream — append-only log"]
-        direction LR
-        e0(("0")) --> e1(("1")) --> e2(("2")) --> e3(("3")) --> e4(("4")) --> e5(("5")) --> next(("…"))
-    end
-    e0 -.->|cursor| Notifications["Consumer: Notifications<br/>next read: offset 1"]
-    e2 -.->|cursor| Billing["Consumer: Billing<br/>next read: offset 3"]
-    e4 -.->|cursor| Analytics["Consumer: Analytics<br/>next read: offset 5"]
+    e0((0)) --> e1((1)) --> e2((2)) --> e3((3)) --> e4((4)) --> e5((5)) --> next(("…"))
+    Notifications[Consumer: Notifications] -. "cursor, next read" .-> e1
+    Billing[Consumer: Billing] -. "cursor, next read" .-> e3
+    Analytics[Consumer: Analytics] -. "cursor, next read" .-> e5
 ```
 
-Three consumers, three independent cursors, one shared log: `Notifications` is nearly caught up,
-`Billing` is a few events behind, `Analytics` further still — none of them affect each other or the
-log, and a consumer can `SeekAsync` its own cursor back to replay events the others already passed.
+Three consumers, three independent cursors, one shared log: `Notifications` is about to read offset
+1, `Billing` offset 3, `Analytics` offset 5 — none of them affect each other or the log, and a
+consumer can `SeekAsync` its own cursor back to replay events the others already passed.
 
 Both modules share:
 
