@@ -28,6 +28,12 @@ public sealed class SellerNotifier(ILogger<SellerNotifier> logger) : StreamConsu
     }
 }
 
+/// <summary>
+/// Stock itself is decremented synchronously and atomically when the order is placed (see
+/// PlaceOrderAsync) — that is the invariant that must never race. This consumer only reacts to the
+/// result, which is exactly the kind of eventually-consistent side effect a stream is for: it reads
+/// whatever the stock happens to be by the time it gets to this event, and never mutates it.
+/// </summary>
 public sealed class InventoryUpdater(MarketDbContext db, ILogger<InventoryUpdater> logger) : StreamConsumer<OrderPlaced>
 {
     public override async Task ConsumeAsync(OrderPlaced e, CancellationToken ct)
@@ -36,9 +42,9 @@ public sealed class InventoryUpdater(MarketDbContext db, ILogger<InventoryUpdate
         if (listing is null)
             return;
 
-        listing.Stock = Math.Max(0, listing.Stock - 1);
-        await db.SaveChangesAsync(ct);
         logger.LogInformation("[inventory] listing {ListingId} now has {Stock} left", e.ListingId, listing.Stock);
+        if (listing.Stock == 0)
+            logger.LogWarning("[inventory] listing {ListingId} is sold out", e.ListingId);
     }
 }
 

@@ -96,22 +96,37 @@ while (true)
 await host.StopAsync();
 return;
 
-// The transactional moment this sample exists to show: the order row, the payment job and the
-// OrderPlaced event all commit together in one SQL transaction — there is no outbox table relaying
-// them afterwards, because they were never written separately in the first place.
+// The transactional moment this sample exists to show: the stock guard, the order row, the payment
+// job and the OrderPlaced event all commit together in one SQL transaction — there is no outbox
+// table relaying them afterwards, because they were never written separately in the first place.
 static async Task PlaceOrderAsync(MarketDbContext db, IJunctionClient junction, int listingId, string buyerId)
 {
     var listing = await db.Listings.FindAsync(listingId)
         ?? throw new InvalidOperationException($"No listing #{listingId}.");
-    if (listing.Stock <= 0)
+
+    await using var transaction = await db.Database.BeginTransactionAsync();
+
+    // Atomic, concurrency-safe: the check and the decrement are one UPDATE statement, not a
+    // read-then-write in C#. Two buyers racing for the last unit both send this statement; Postgres
+    // serializes them on the row, and only the one that still sees stock > 0 when its turn comes
+    // affects a row. A plain "if (listing.Stock > 0)" checked in code would let both through.
+    int decremented = await db.Listings
+        .Where(l => l.Id == listingId && l.Stock > 0)
+        .ExecuteUpdateAsync(s => s.SetProperty(l => l.Stock, l => l.Stock - 1));
+    if (decremented == 0)
         throw new InvalidOperationException($"Listing #{listingId} is out of stock.");
 
     var order = new Order { ListingId = listing.Id, BuyerId = buyerId, Amount = listing.Price, PlacedAt = DateTime.UtcNow };
     db.Orders.Add(order);
     await db.SaveChangesAsync();
 
+    // Queue and Stream ride this same transaction (Junction detects it via the DbContext), so the
+    // commit below is the one moment the stock decrement, the order, the payment job and the event
+    // all become visible together — or, on any failure above, none of them do.
     await junction.Queue.Producer.EnqueueAsync(new ChargeBuyer(order.Id, buyerId, order.Amount));
     await junction.Stream.Producer.AppendAsync(new OrderPlaced(order.Id, listing.Id, listing.SellerId, order.Amount));
+
+    await transaction.CommitAsync();
 
     Console.WriteLine($"  placed order #{order.Id}: {buyerId} bought \"{listing.Title}\" for {order.Amount:C}");
 }

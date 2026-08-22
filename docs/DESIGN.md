@@ -9,6 +9,28 @@ Junction is two engines behind one façade:
 - **`Junction.Stream`** — fan-out. An append-only log with per-consumer durable offsets: every
   consumer reads the whole log independently and can replay it.
 
+```mermaid
+flowchart LR
+    subgraph Queue["Junction.Queue — fan-in"]
+        direction LR
+        QP([Producer]) -- EnqueueAsync --> Q[(queue)]
+        Q -- claims --> QW1[Worker A]
+        Q -- claims --> QW2[Worker B]
+        Q -- claims --> QW1
+    end
+
+    subgraph Stream["Junction.Stream — fan-out"]
+        direction LR
+        SP([Producer]) -- AppendAsync --> S[(log)]
+        S -- "full log, own cursor" --> SC1[Consumer A]
+        S -- "full log, own cursor" --> SC2[Consumer B]
+        S -- "full log, own cursor" --> SC3[Consumer C]
+    end
+```
+
+Each Queue message goes to exactly one worker, whichever claims it first; each Stream event goes to
+every consumer, independently, at its own pace.
+
 Both modules share:
 
 - **One schema.** `junction` by default. Table names don't collide (`queues`, `messages`,
