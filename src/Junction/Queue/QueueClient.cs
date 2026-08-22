@@ -19,32 +19,39 @@ internal sealed class QueueClient : IQueueClient
         Producer = new QueueProducer(catalog, source, serializer);
     }
 
+    /// <inheritdoc/>
     public IQueueProducer Producer { get; }
 
+    /// <inheritdoc/>
     public IQueueConsumer GetConsumer(string queue, string? workerId = null) =>
         new QueueConsumer(_catalog, _source, queue, workerId);
 
+    /// <inheritdoc/>
     public Task InitializeAsync(CancellationToken cancellationToken = default) =>
         _catalog.InitializeAsync(_source, cancellationToken);
 
+    /// <inheritdoc/>
     public Task ReinitializeAsync(CancellationToken cancellationToken = default)
     {
         _catalog.Forget();
         return _catalog.InitializeAsync(_source, cancellationToken);
     }
 
+    /// <inheritdoc/>
     public async Task EnsureQueueAsync(string queue, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(queue);
         await _catalog.ResolveAsync(_source, queue, cancellationToken);
     }
 
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<string>> ListQueuesAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await _source.AcquireAsync(cancellationToken);
         return await QueueCommands.ListQueuesAsync(connection, _catalog.Sql, cancellationToken);
     }
 
+    /// <inheritdoc/>
     public async Task<QueueStats> GetStatsAsync(string queue, CancellationToken cancellationToken = default)
     {
         int queueId = await _catalog.RequireAsync(_source, queue, cancellationToken);
@@ -52,12 +59,14 @@ internal sealed class QueueClient : IQueueClient
         return await QueueCommands.StatsAsync(connection, _catalog.Sql, queueId, queue, cancellationToken);
     }
 
+    /// <inheritdoc/>
     public async Task<StorageStats> GetStorageStatsAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await _source.AcquireAsync(cancellationToken);
         return await QueueCommands.StorageStatsAsync(connection, _catalog.Sql, cancellationToken);
     }
 
+    /// <inheritdoc/>
     public async Task<long> RecoverExpiredLeasesAsync(
         string? queue = null, int maxMessages = 1000, CancellationToken cancellationToken = default)
     {
@@ -73,6 +82,7 @@ internal sealed class QueueClient : IQueueClient
         return buried + recovered;
     }
 
+    /// <inheritdoc/>
     public async Task<long> PurgeAsync(string queue, CancellationToken cancellationToken = default)
     {
         int queueId = await _catalog.RequireAsync(_source, queue, cancellationToken);
@@ -80,6 +90,7 @@ internal sealed class QueueClient : IQueueClient
         return await QueueCommands.PurgeAsync(connection, _catalog.Sql, queueId, cancellationToken);
     }
 
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<DeadLetter>> GetDeadLettersAsync(
         string queue, int maxMessages = 100, CancellationToken cancellationToken = default)
     {
@@ -91,6 +102,7 @@ internal sealed class QueueClient : IQueueClient
             connection, _catalog.Sql, queueId, queue, maxMessages, cancellationToken);
     }
 
+    /// <inheritdoc/>
     public async Task<long> RequeueDeadLettersAsync(
         string queue, long? deadLetterId = null, int maxMessages = 100,
         CancellationToken cancellationToken = default)
@@ -103,6 +115,7 @@ internal sealed class QueueClient : IQueueClient
             connection, _catalog.Sql, queueId, deadLetterId, maxMessages, cancellationToken);
     }
 
+    /// <inheritdoc/>
     public async Task<long> PruneAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await _source.AcquireAsync(cancellationToken);
@@ -113,18 +126,21 @@ internal sealed class QueueClient : IQueueClient
         return archived + dead;
     }
 
+    /// <inheritdoc/>
     public IQueueClient Using(DbConnection connection, DbTransaction? transaction = null)
     {
         ArgumentNullException.ThrowIfNull(connection);
         return new QueueClient(_catalog, new ExistingConnectionSource(connection, transaction), _serializer);
     }
 
+    /// <inheritdoc/>
     public IQueueClient Using(DbContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
         return new QueueClient(_catalog, new EfCoreConnectionSource(context), _serializer);
     }
 
+    /// <inheritdoc/>
     public async Task<IJunctionTransaction?> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
         await _source.BeginTransactionAsync(cancellationToken);
 }

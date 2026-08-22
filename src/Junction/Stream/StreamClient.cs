@@ -12,11 +12,14 @@ internal sealed class StreamClient(
     StreamOptions options,
     StreamInitGate initGate) : IStreamClient
 {
+    /// <inheritdoc/>
     public IEventProducer Producer { get; } = producer;
 
+    /// <inheritdoc/>
     public IEventConsumer GetConsumer(string stream, string consumerName) =>
         new EventConsumer(factory, stream, consumerName, notifications);
 
+    /// <inheritdoc/>
     public async Task InitializeAsync(CancellationToken ct = default)
     {
         if (initGate.Initialized || !options.AutoCreateSchema)
@@ -42,6 +45,7 @@ internal sealed class StreamClient(
         }
     }
 
+    /// <inheritdoc/>
     public async Task EnsureStreamAsync(string stream, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(stream);
@@ -49,12 +53,14 @@ internal sealed class StreamClient(
         await StreamOps.EnsureStreamAsync(ctx, stream, ct);
     }
 
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<string>> ListStreamsAsync(CancellationToken ct = default)
     {
         await using var ctx = await factory.CreateDbContextAsync(ct);
         return await ctx.Streams.OrderBy(s => s.Name).Select(s => s.Name).ToListAsync(ct);
     }
 
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<string>> ListConsumersAsync(string stream, CancellationToken ct = default)
     {
         await using var ctx = await factory.CreateDbContextAsync(ct);
@@ -67,6 +73,7 @@ internal sealed class StreamClient(
             .ToListAsync(ct);
     }
 
+    /// <inheritdoc/>
     public async Task<ConsumerLag> GetConsumerLagAsync(string stream, string consumerName, CancellationToken ct = default)
     {
         await using var ctx = await factory.CreateDbContextAsync(ct);
@@ -77,6 +84,7 @@ internal sealed class StreamClient(
         return new ConsumerLag(stream, consumerName, pos, end);
     }
 
+    /// <inheritdoc/>
     public async Task<StreamStats> GetStreamStatsAsync(string stream, CancellationToken ct = default)
     {
         await using var ctx = await factory.CreateDbContextAsync(ct);
@@ -107,6 +115,7 @@ internal sealed class StreamClient(
         };
     }
 
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<StreamDeadLetter>> GetDeadLettersAsync(
         string stream, string? consumerName = null, int maxMessages = 100, CancellationToken ct = default)
     {
@@ -137,6 +146,7 @@ internal sealed class StreamClient(
         }).ToList();
     }
 
+    /// <inheritdoc/>
     public async Task<StorageStats> GetStorageStatsAsync(CancellationToken ct = default)
     {
         await using var ctx = await factory.CreateDbContextAsync(ct);
