@@ -12,12 +12,19 @@ order, one at a time per claim — the claim order below is global across every 
 
 ```mermaid
 flowchart LR
-    m1["msg 1"] -->|"claim #1<br/>A is free"| A[Worker A]
-    m2["msg 2"] -->|"claim #2<br/>A busy, B claims"| B[Worker B]
-    m3["msg 3"] -->|"claim #3<br/>A free again"| A
-    m4["msg 4"] -->|"claim #4<br/>B free again"| B
-    m5["msg 5"] -->|"claim #5<br/>A free again"| A
-    m1 ~~~ m2 ~~~ m3 ~~~ m4 ~~~ m5
+    subgraph Q["Queue — ready, in enqueue order"]
+        direction TB
+        m1["msg 1"]
+        m2["msg 2"]
+        m3["msg 3"]
+        m4["msg 4"]
+        m5["msg 5"]
+    end
+    m1 -->|"claim #1<br/>A is free"| A[Worker A]
+    m2 -->|"claim #2<br/>A busy, B claims"| B[Worker B]
+    m3 -->|"claim #3<br/>A free again"| A
+    m4 -->|"claim #4<br/>B free again"| B
+    m5 -->|"claim #5<br/>A free again"| A
 ```
 
 Worker A claims #1, is still busy with it when #2 becomes claimable, so Worker B takes #2; whichever
@@ -32,7 +39,10 @@ only that consumer's own cursor moves:
 
 ```mermaid
 flowchart LR
-    e0((0)) --> e1((1)) --> e2((2)) --> e3((3)) --> e4((4)) --> e5((5)) --> next(("…"))
+    subgraph S["Stream — append-only log"]
+        direction LR
+        e0((0)) --> e1((1)) --> e2((2)) --> e3((3)) --> e4((4)) --> e5((5)) --> next(("…"))
+    end
     Notifications[Consumer: Notifications] -. "cursor, next read" .-> e1
     Billing[Consumer: Billing] -. "cursor, next read" .-> e3
     Analytics[Consumer: Analytics] -. "cursor, next read" .-> e5
