@@ -1,5 +1,31 @@
 # Benchmarks
 
+## Scale tests (10M+ rows)
+
+`tests/Junction.Tests/Queue/ScaleTests.cs` and `tests/Junction.Tests/Stream/ScaleTests.cs` are
+**correctness** tests at a size `VolumeTests` deliberately stays below — a backlog/stream past ten
+million rows. Each one writes the full volume in large batches, checks the `EXPLAIN` plan of the
+claim/poll query still uses its index (never a scan of ten million rows), then drains it back out and
+checks nothing was lost, duplicated, or reordered. They log throughput (`msg/s` / `ev/s`) as they go,
+so a run also doubles as a rough load number for your own hardware — but the assertions are all
+correctness, not a wall-clock threshold, for the same reason as `VolumeTests`.
+
+They are tagged `[Trait("Category", "Scale")]` and excluded from CI's default run
+(`--filter "Category!=Scale"` in `ci.yml`) because writing and draining 10M+ rows takes minutes, not
+seconds. Run them explicitly:
+
+```bash
+dotnet test tests/Junction.Tests --filter Category=Scale
+```
+
+Override the size with an environment variable (e.g. to go past 10M, or to shrink it for a quick local
+smoke run):
+
+```bash
+JUNCTION_QUEUE_SCALE_MESSAGES=50000000 dotnet test tests/Junction.Tests --filter "FullyQualifiedName~Queue.ScaleTests"
+JUNCTION_STREAM_SCALE_EVENTS=50000000 dotnet test tests/Junction.Tests --filter "FullyQualifiedName~Stream.ScaleTests"
+```
+
 `benchmarks/Junction.Benchmarks` is a [BenchmarkDotNet](https://benchmarkdotnet.org) harness (warmup,
 multiple iterations, `MemoryDiagnoser`) covering both modules. It starts a throwaway PostgreSQL 18
 container automatically, or targets an existing database via `JUNCTION_BENCH_CONNECTION`:

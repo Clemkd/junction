@@ -30,9 +30,12 @@ jobs:
       - name: Build
         run: dotnet build --no-restore -c Release
 
+      # "Scale" tests write and drain 10M+ rows to prove the design at that size — correct, but
+      # minutes long, which does not belong gating every push. See docs/BENCHMARK.md.
       - name: Test with coverage
         run: >
           dotnet test tests/Junction.Tests --no-build -c Release
+          --filter "Category!=Scale"
           --collect:"XPlat Code Coverage"
           --results-directory ./coverage
 
