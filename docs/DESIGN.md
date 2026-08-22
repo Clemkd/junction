@@ -2,40 +2,13 @@
 
 ## Architecture
 
-Junction is two engines behind one façade:
+Junction is two engines behind one façade.
 
-- **`Junction.Queue`** — competing consumers (fan-in). `FOR UPDATE SKIP LOCKED` claims, fenced lease
-  tokens, and a partial index on the hot table ensure exactly one worker ever holds a given message.
-- **`Junction.Stream`** — fan-out. An append-only log with per-consumer durable offsets: every
-  consumer reads the whole log independently and can replay it.
+### `Junction.Queue` — competing consumers (fan-in)
 
-```mermaid
-flowchart LR
-    subgraph Queue["Junction.Queue — fan-in"]
-        direction LR
-        QP([Producer]) -- EnqueueAsync --> Q[(queue)]
-        Q -- claims --> QW1[Worker A]
-        Q -- claims --> QW2[Worker B]
-        Q -- claims --> QW1
-    end
-
-    subgraph Stream["Junction.Stream — fan-out"]
-        direction LR
-        SP([Producer]) -- AppendAsync --> S[(log)]
-        S -- "full log, own cursor" --> SC1[Consumer A]
-        S -- "full log, own cursor" --> SC2[Consumer B]
-        S -- "full log, own cursor" --> SC3[Consumer C]
-    end
-```
-
-Each Queue message goes to exactly one worker, whichever claims it first; each Stream event goes to
-every consumer, independently, at its own pace.
-
-### Queue: claim order
-
-Ready messages are claimed in priority-then-FIFO order, one at a time per claim, via
-`FOR UPDATE SKIP LOCKED` — whichever worker's claim statement runs next gets the next message, so the
-claim order below is global across every worker, not per-worker:
+`FOR UPDATE SKIP LOCKED` claims, fenced lease tokens, and a partial index on the hot table ensure
+exactly one worker ever holds a given message. Ready messages are claimed in priority-then-FIFO
+order, one at a time per claim — the claim order below is global across every worker, not per-worker:
 
 ```mermaid
 flowchart LR
@@ -58,9 +31,11 @@ Worker A claims #1, is still busy with it when #2 becomes claimable, so Worker B
 worker finishes first claims the next one. `SKIP LOCKED` guarantees the same message is never handed
 to two workers, regardless of how many claim concurrently.
 
-### Stream: one cursor per consumer
+### `Junction.Stream` — fan-out
 
-The log itself never changes because of a consumer reading it — only that consumer's own cursor moves:
+An append-only log with per-consumer durable offsets: every consumer reads the whole log
+independently and can replay it. The log itself never changes because of a consumer reading it —
+only that consumer's own cursor moves:
 
 ```mermaid
 flowchart LR
