@@ -40,4 +40,16 @@ public interface IStreamClient
     /// </summary>
     Task<IReadOnlyList<StreamDeadLetter>> GetDeadLettersAsync(
         string stream, string? consumerName = null, int maxMessages = 100, CancellationToken ct = default);
+
+    /// <summary>
+    /// Delete events every live consumer has safely passed, across every stream. An event is eligible
+    /// once it is at least <see cref="StreamOptions.RetentionMargin"/> messages behind the slowest
+    /// cursor updated within <see cref="StreamOptions.CursorStaleAfter"/> — a cursor that has not
+    /// moved in that long is excluded from that computation (treated as abandoned), so one dead
+    /// consumer cannot block purging forever. A stream with no live cursor is left untouched: nothing
+    /// purges until at least one consumer establishes how far it is safe to go. Runs automatically
+    /// when <c>AddStreamMaintenance</c> is registered; call it yourself if you would rather schedule
+    /// it. Returns how many events were removed.
+    /// </summary>
+    Task<long> PruneAsync(CancellationToken ct = default);
 }

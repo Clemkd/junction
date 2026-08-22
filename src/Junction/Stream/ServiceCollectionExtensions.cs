@@ -170,12 +170,37 @@ public static class ServiceCollectionExtensions
 
         services.TryAdd(new ServiceDescriptor(t, t, lifetime));
 
-        var options = new ConsumerHostOptions();
-        configure?.Invoke(options);
+        var hostOptions = new ConsumerHostOptions();
+        configure?.Invoke(hostOptions);
 
         services.AddSingleton<IHostedService>(sp =>
-            (IHostedService)ActivatorUtilities.CreateInstance(sp, hostType, options));
+            (IHostedService)ActivatorUtilities.CreateInstance(sp, hostType, hostOptions));
+
+        // A stream nobody prunes keeps every event forever the first time it is actually consumed.
+        if (services.FirstOrDefault(d => d.ServiceType == typeof(StreamOptions))?.ImplementationInstance
+                is not StreamOptions streamOptions || streamOptions.AutoPrune)
+            services.AddStreamMaintenance();
 
         return services;
     }
+
+    /// <summary>
+    /// Run the retention loop: delete events every live consumer has safely passed (see
+    /// <see cref="IStreamClient.PruneAsync"/>). Idempotent, and registered automatically by
+    /// <see cref="AddStreamConsumer{TConsumer}"/> unless <see cref="StreamOptions.AutoPrune"/> is
+    /// turned off. Safe to run on every instance.
+    /// </summary>
+    public static IServiceCollection AddStreamMaintenance(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        if (services.Any(d => d.ServiceType == typeof(MaintenanceMarker)))
+            return services;
+
+        services.AddSingleton<MaintenanceMarker>();
+        services.AddSingleton<IHostedService, StreamMaintenanceService>();
+        return services;
+    }
+
+    private sealed class MaintenanceMarker;
 }

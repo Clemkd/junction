@@ -244,6 +244,10 @@ services.AddJunction<AppDbContext>(o =>
 | `EnableGroupCommit` | Coalesce single-event appends into grouped transactions via a background flusher. These appends run on the flusher's own connection and do not join a caller's ambient transaction, even under `AddStream<TContext>`. | `false` |
 | `GroupCommitMaxBatch` | Maximum events coalesced into a single group-commit flush. | `1000` |
 | `GroupCommitLinger` | How long the flusher waits for more events to accumulate before flushing a partial batch. | `2ms` |
+| `RetentionMargin` | Events are kept at least this many messages behind every consumer's cursor. | `1000` |
+| `CursorStaleAfter` | A cursor that hasn't committed in this long is excluded from the retention floor (treated as abandoned), so it can't block pruning forever. | `30 days` |
+| `MaintenanceInterval` | Interval of the retention loop (`IStreamClient.PruneAsync`). | `10 min` |
+| `AutoPrune` | Register the retention loop automatically alongside the first hosted consumer. | `true` |
 
 ## Not included
 

@@ -58,4 +58,32 @@ public sealed class StreamOptions
     /// never waits for a full batch. Default: 2 ms.
     /// </summary>
     public TimeSpan GroupCommitLinger { get; set; } = TimeSpan.FromMilliseconds(2);
+
+    /// <summary>
+    /// Events are kept at least this many messages behind every consumer's cursor, so
+    /// <see cref="IStreamClient.PruneAsync"/> never deletes something a consumer could still want to
+    /// seek back to. Default: 1000.
+    /// </summary>
+    public long RetentionMargin { get; set; } = 1000;
+
+    /// <summary>
+    /// A cursor that has not committed in this long is treated as abandoned and excluded from
+    /// <see cref="IStreamClient.PruneAsync"/>'s retention floor, so one dead consumer cannot block
+    /// purging forever. A stream with no cursor updated within this window is left untouched — nothing
+    /// purges until at least one live consumer establishes how far it is safe to go. Default: 30 days.
+    /// </summary>
+    public TimeSpan CursorStaleAfter { get; set; } = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// Interval of the maintenance loop (<see cref="IStreamClient.PruneAsync"/>) started by
+    /// <c>AddStreamMaintenance</c>. Default: 10 min.
+    /// </summary>
+    public TimeSpan MaintenanceInterval { get; set; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// Register the maintenance loop automatically alongside the first hosted consumer (default:
+    /// <c>true</c>). Without it, nothing calls <see cref="IStreamClient.PruneAsync"/> and every stream
+    /// keeps every event forever — so this is on unless you schedule pruning yourself.
+    /// </summary>
+    public bool AutoPrune { get; set; } = true;
 }

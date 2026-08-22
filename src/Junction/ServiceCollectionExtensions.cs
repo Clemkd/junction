@@ -97,6 +97,10 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddJunctionMaintenance(this IServiceCollection services) =>
         services.AddQueueMaintenance();
 
+    /// <summary>Run the Stream module's retention loop. See <c>AddStreamMaintenance</c>.</summary>
+    public static IServiceCollection AddJunctionStreamMaintenance(this IServiceCollection services) =>
+        services.AddStreamMaintenance();
+
     /// <summary>Start filling the Queue module's gauges. See <c>AddQueueMetrics</c>.</summary>
     public static IServiceCollection AddJunctionMetrics(this IServiceCollection services) =>
         services.AddQueueMetrics();

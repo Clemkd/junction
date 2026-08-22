@@ -147,6 +147,35 @@ internal sealed class StreamClient(
     }
 
     /// <inheritdoc/>
+    public async Task<long> PruneAsync(CancellationToken ct = default)
+    {
+        await using var ctx = await factory.CreateDbContextAsync(ct);
+        await using var cmd = await CreateCommandAsync(ctx, ct);
+        cmd.CommandText =
+            """
+            WITH floors AS (
+                SELECT stream_id, MIN(position) AS min_pos
+                FROM junction.consumer_cursors
+                WHERE updated_at >= @stale_cutoff
+                GROUP BY stream_id
+            ),
+            deleted AS (
+                DELETE FROM junction.stream_events AS e
+                USING floors AS f
+                WHERE e.stream_id = f.stream_id
+                  AND e.seq < GREATEST(0, f.min_pos - @margin)
+                RETURNING e.id
+            )
+            SELECT count(*) FROM deleted
+            """;
+        AddParam(cmd, "stale_cutoff", DateTime.UtcNow - options.CursorStaleAfter);
+        AddParam(cmd, "margin", options.RetentionMargin);
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return Convert.ToInt64(result);
+    }
+
+    /// <inheritdoc/>
     public async Task<StorageStats> GetStorageStatsAsync(CancellationToken ct = default)
     {
         await using var ctx = await factory.CreateDbContextAsync(ct);
