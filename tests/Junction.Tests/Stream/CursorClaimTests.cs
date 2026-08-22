@@ -80,7 +80,9 @@ public sealed class CursorClaimTests(PostgresFixture fixture)
         var services = new ServiceCollection();
         services.AddLogging(b => b.AddProvider(logs));
         services.AddSingleton(new Probe { Stream = stream, ConsumerName = "twice" });
-        services.AddStream(fixture.ConnectionString);
+        // AutoPrune off: this test counts hosted services to confirm exactly two consumer hosts were
+        // registered, which the auto-registered maintenance service would otherwise throw off.
+        services.AddStream(fixture.ConnectionString, o => o.AutoPrune = false);
         services.AddStreamConsumer<ProbeConsumer>();
         services.AddStreamConsumer<ProbeConsumer>();   // same cursor, twice
 
