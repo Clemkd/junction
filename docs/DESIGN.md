@@ -44,13 +44,16 @@ only that consumer's own cursor moves:
 
 ```mermaid
 flowchart LR
+    Producer([Producer]) -->|AppendAsync| e0
+
     subgraph S["Stream — append-only log"]
         direction LR
         e0((0)) --> e1((1)) --> e2((2)) --> e3((3)) --> e4((4)) --> e5((5)) --> next(("…"))
     end
-    Notifications[Consumer: Notifications] -. "cursor, next read" .-> e1
-    Billing[Consumer: Billing] -. "cursor, next read" .-> e3
-    Analytics[Consumer: Analytics] -. "cursor, next read" .-> e5
+
+    e1 -. "cursor, next read" .-> Notifications[Consumer: Notifications]
+    e3 -. "cursor, next read" .-> Billing[Consumer: Billing]
+    e5 -. "cursor, next read" .-> Analytics[Consumer: Analytics]
 ```
 
 Three consumers, three independent cursors, one shared log: `Notifications` is about to read offset
